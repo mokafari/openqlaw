@@ -391,6 +391,7 @@ export async function resolveReplyDirectives(params: {
     provider,
     model,
     hasModelDirective: directives.hasModelDirective,
+    prompt: promptSource,
   });
   provider = modelState.provider;
   model = modelState.model;

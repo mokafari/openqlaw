@@ -449,4 +449,18 @@ export type ToolsConfig = {
       deny?: string[];
     };
   };
+  /** Evolution and self-modification configuration. */
+  evolution?: {
+    /** Self-modification capabilities for autonomous code improvement. */
+    selfModification?: {
+      /** Enable self-modification tools and mutation cycles (default: false). */
+      enabled?: boolean;
+      /** Path to self-modification policy file (default: ~/.openclaw/evolution/self-modification-policy.json). */
+      policyPath?: string;
+      /** Maximum number of concurrent mutations (default: 1). */
+      maxConcurrentMutations?: number;
+      /** Auto-trigger mutation cycle when tool error rate exceeds threshold (default: false). */
+      autoTrigger?: boolean;
+    };
+  };
 };

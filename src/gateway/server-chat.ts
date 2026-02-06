@@ -318,6 +318,7 @@ export function createAgentEventHandler({
   };
 
   return (evt: AgentEventPayload) => {
+    // Lifecycle debug logging removed – was causing excessive log noise for cron-triggered runs.
     const chatLink = chatRunState.registry.peek(evt.runId);
     const sessionKey = chatLink?.sessionKey ?? resolveSessionKeyForRun(evt.runId);
     const clientRunId = chatLink?.clientRunId ?? evt.runId;
@@ -370,11 +371,41 @@ export function createAgentEventHandler({
     if (sessionKey) {
       nodeSendToSession(sessionKey, "agent", isToolEvent ? toolPayload : agentPayload);
       if (!isAborted && evt.stream === "assistant" && typeof evt.data?.text === "string") {
+        broadcast("agent", {
+          runId: evt.runId,
+          stream: "debug",
+          ts: Date.now(),
+          sessionKey,
+          data: {
+            message: `assistant delta: runId=${evt.runId}, clientRunId=${clientRunId}, textLength=${evt.data.text.length}, seq=${evt.seq}`,
+          },
+        });
         emitChatDelta(sessionKey, clientRunId, evt.seq, evt.data.text);
       } else if (!isAborted && (lifecyclePhase === "end" || lifecyclePhase === "error")) {
+        // Log before emitChatFinal to debug empty buffer issue
+        const bufferText = chatRunState.buffers.get(clientRunId);
+        broadcast("agent", {
+          runId: evt.runId,
+          stream: "debug",
+          ts: Date.now(),
+          sessionKey,
+          data: {
+            message: `lifecycle end: runId=${evt.runId}, clientRunId=${clientRunId}, bufferLength=${bufferText?.length ?? 0}, chatLink=${chatLink ? "found" : "missing"}`,
+          },
+        });
         if (chatLink) {
           const finished = chatRunState.registry.shift(evt.runId);
           if (!finished) {
+            // Log warning if shift returned undefined (shouldn't happen if peek found it)
+            broadcast("agent", {
+              runId: evt.runId,
+              stream: "debug",
+              ts: Date.now(),
+              sessionKey,
+              data: {
+                message: `chatLink peek found but shift returned undefined for runId=${evt.runId}`,
+              },
+            });
             clearAgentRunContext(evt.runId);
             return;
           }
@@ -386,9 +417,20 @@ export function createAgentEventHandler({
             evt.data?.error,
           );
         } else {
+          // If chatLink is missing, log it and use agent runId as fallback
+          // This can happen if registration didn't occur or runId mismatch
+          broadcast("agent", {
+            runId: evt.runId,
+            stream: "debug",
+            ts: Date.now(),
+            sessionKey,
+            data: {
+              message: `chatLink missing for lifecycle end, runId=${evt.runId}, sessionKey=${sessionKey}, using agent runId as clientRunId`,
+            },
+          });
           emitChatFinal(
             sessionKey,
-            evt.runId,
+            evt.runId, // Use agent runId as fallback (should match clientRunId for webchat)
             evt.seq,
             lifecyclePhase === "error" ? "error" : "done",
             evt.data?.error,

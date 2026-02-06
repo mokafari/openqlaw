@@ -88,10 +88,32 @@ export async function executeJob(
     job.state.lastDurationMs = Math.max(0, endedAt - startedAt);
     job.state.lastError = err;
 
+    // Track consecutive errors; reset on non-error.
+    if (status === "error") {
+      job.state.errorCount = (job.state.errorCount ?? 0) + 1;
+    } else {
+      job.state.errorCount = undefined;
+    }
+
+    // Disable one-shot jobs that fail repeatedly to prevent infinite retry loops.
+    const maxOneShotRetries = 3;
+    const isStuckOneShot =
+      job.schedule.kind === "at" &&
+      status === "error" &&
+      (job.state.errorCount ?? 0) >= maxOneShotRetries;
+    if (isStuckOneShot) {
+      state.deps.log.warn(
+        { jobId: job.id, name: job.name, errorCount: job.state.errorCount },
+        "cron: disabling one-shot job after repeated failures",
+      );
+      job.enabled = false;
+      job.state.nextRunAtMs = undefined;
+    }
+
     const shouldDelete =
       job.schedule.kind === "at" && status === "ok" && job.deleteAfterRun === true;
 
-    if (!shouldDelete) {
+    if (!shouldDelete && !isStuckOneShot) {
       if (job.schedule.kind === "at" && status === "ok") {
         // One-shot job completed successfully; disable it.
         job.enabled = false;
@@ -113,6 +135,26 @@ export async function executeJob(
       durationMs: job.state.lastDurationMs,
       nextRunAtMs: job.state.nextRunAtMs,
     });
+
+    // Camping wake: when a camping cron job fires, exit camping state for the session.
+    if (job.metadata?.camping && status === "ok") {
+      try {
+        const { globalCampingManager } = await import("../../agents/camping.js");
+        const campingSessionId = job.agentId ?? job.id;
+        const exited = globalCampingManager.exitCamping(campingSessionId);
+        if (exited) {
+          state.deps.log.info(
+            { jobId: job.id, sessionId: campingSessionId },
+            "cron: camping job completed, exited camping state",
+          );
+        }
+      } catch (campErr) {
+        state.deps.log.warn(
+          { jobId: job.id, error: String(campErr) },
+          "cron: failed to exit camping state after camping job",
+        );
+      }
+    }
 
     if (shouldDelete && state.store) {
       state.store.jobs = state.store.jobs.filter((j) => j.id !== job.id);

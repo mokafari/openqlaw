@@ -59,6 +59,18 @@ export type CronJobState = {
   lastStatus?: "ok" | "error" | "skipped";
   lastError?: string;
   lastDurationMs?: number;
+  /** Consecutive error count (reset on success). Used to disable stuck one-shot jobs. */
+  errorCount?: number;
+};
+
+export type CronJobMetadata = {
+  condition?: {
+    kind: "webhook";
+    endpoint: string;
+    filter?: Record<string, unknown>;
+  };
+  camping?: boolean;
+  [key: string]: unknown;
 };
 
 export type CronJob = {
@@ -75,6 +87,7 @@ export type CronJob = {
   wakeMode: CronWakeMode;
   payload: CronPayload;
   delivery?: CronDelivery;
+  metadata?: CronJobMetadata;
   state: CronJobState;
 };
 

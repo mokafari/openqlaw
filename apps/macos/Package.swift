@@ -89,4 +89,5 @@ let package = Package(
                 .enableUpcomingFeature("StrictConcurrency"),
                 .enableExperimentalFeature("SwiftTesting"),
             ]),
-    ])
+    ],
+    swiftLanguageModes: [.v6])

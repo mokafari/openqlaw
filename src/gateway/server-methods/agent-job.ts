@@ -127,7 +127,7 @@ export async function waitForAgentJob(params: {
       recordAgentRunSnapshot(snapshot);
       finish(snapshot);
     });
-    const timer = setTimeout(() => finish(null), Math.max(1, timeoutMs));
+    const timer = setTimeout(() => finish(null), Math.min(Math.max(1, timeoutMs), 2_147_483_647));
   });
 }
 

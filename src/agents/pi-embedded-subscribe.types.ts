@@ -1,5 +1,6 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { ReasoningLevel, VerboseLevel } from "../auto-reply/thinking.js";
+import type { SynonymDictionary } from "./personality/synonyms.js";
 import type { BlockReplyChunking } from "./pi-embedded-block-chunker.js";
 
 export type ToolResultFormat = "markdown" | "plain";
@@ -30,6 +31,8 @@ export type SubscribeEmbeddedPiSessionParams = {
   onAssistantMessageStart?: () => void | Promise<void>;
   onAgentEvent?: (evt: { stream: string; data: Record<string, unknown> }) => void | Promise<void>;
   enforceFinalTag?: boolean;
+  /** Optional synonym dictionary for personality-aware tool output formatting. */
+  synonymDictionary?: SynonymDictionary;
 };
 
 export type { BlockReplyChunking } from "./pi-embedded-block-chunker.js";

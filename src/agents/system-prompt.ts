@@ -4,6 +4,7 @@ import type { ResolvedTimeFormat } from "./date-time.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
+import { getStateDescription } from "./fsm/states.js";
 
 /**
  * Controls which hardcoded sections are included in the system prompt.
@@ -161,7 +162,7 @@ function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readT
   ];
 }
 
-export function buildAgentSystemPrompt(params: {
+export async function buildAgentSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
@@ -214,6 +215,12 @@ export function buildAgentSystemPrompt(params: {
     channel: string;
   };
   memoryCitationsMode?: MemoryCitationsMode;
+  /** FSM state for agent state machine */
+  fsmState?: string;
+  /** Goal stack summary */
+  goalStackSummary?: string;
+  /** Active tool clusters */
+  activeClusters?: string[];
 }) {
   const coreToolSummaries: Record<string, string> = {
     read: "Read file contents",
@@ -550,7 +557,36 @@ export function buildAgentSystemPrompt(params: {
 
   const contextFiles = params.contextFiles ?? [];
   if (contextFiles.length > 0) {
-    const hasSoulFile = contextFiles.some((file) => {
+    // Apply BSP filtering if workspace directory is available
+    let filteredContextFiles = contextFiles;
+    if (params.workspaceDir) {
+      // Use dynamic import for optional BSP tree filtering
+      try {
+        const bspModule = await import("./aas/bsp-tree.js");
+        const { filterContextByDepth, getContextDepth, isContextPortal } = bspModule;
+        // Determine current depth from the most specific file path
+        const currentDepth = contextFiles.reduce((maxDepth: number, file) => {
+          const depth = getContextDepth(file.path, params.workspaceDir);
+          return Math.max(maxDepth, depth);
+        }, 0);
+        // Filter context files by depth, but always include portals
+        filteredContextFiles = contextFiles.filter((file) => {
+          // Always include portals (package.json, SOUL.md, etc.)
+          if (isContextPortal(file.path, params.workspaceDir)) {
+            return true;
+          }
+          // Filter by depth proximity
+          const fileDepth = getContextDepth(file.path, params.workspaceDir);
+          const depthDiff = Math.abs(fileDepth - currentDepth);
+          return depthDiff <= 1; // Include files within 1 depth level
+        });
+      } catch {
+        // BSP tree module not available, skip filtering
+        filteredContextFiles = contextFiles;
+      }
+    }
+
+    const hasSoulFile = filteredContextFiles.some((file) => {
       const normalizedPath = file.path.trim().replace(/\\/g, "/");
       const baseName = normalizedPath.split("/").pop() ?? normalizedPath;
       return baseName.toLowerCase() === "soul.md";
@@ -562,7 +598,7 @@ export function buildAgentSystemPrompt(params: {
       );
     }
     lines.push("");
-    for (const file of contextFiles) {
+    for (const file of filteredContextFiles) {
       lines.push(`## ${file.path}`, "", file.content, "");
     }
   }
@@ -596,6 +632,47 @@ export function buildAgentSystemPrompt(params: {
       'If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.',
       "",
     );
+  }
+
+  // Add FSM state, goal stack, and cluster info if available
+  const quakeBotSections: string[] = [];
+
+  if (params.fsmState) {
+    try {
+      const description = getStateDescription(params.fsmState as any);
+      quakeBotSections.push(
+        "## Agent State (FSM)",
+        `Current state: ${params.fsmState}`,
+        `Description: ${description}`,
+        "Use goal_push/goal_pop/goal_status tools to manage multi-step tasks.",
+        "",
+      );
+    } catch {
+      // Fallback if state not recognized
+      quakeBotSections.push(
+        "## Agent State (FSM)",
+        `Current state: ${params.fsmState}`,
+        "Use goal_push/goal_pop/goal_status tools to manage multi-step tasks.",
+        "",
+      );
+    }
+  }
+
+  if (params.goalStackSummary) {
+    quakeBotSections.push("## Goal Stack", params.goalStackSummary, "");
+  }
+
+  if (params.activeClusters && params.activeClusters.length > 0) {
+    quakeBotSections.push(
+      "## Active Tool Clusters",
+      `Currently active: ${params.activeClusters.join(", ")}`,
+      "Tools are grouped by operational context to reduce token usage.",
+      "",
+    );
+  }
+
+  if (quakeBotSections.length > 0) {
+    lines.push(...quakeBotSections);
   }
 
   lines.push(

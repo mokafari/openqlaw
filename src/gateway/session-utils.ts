@@ -528,7 +528,7 @@ export function resolveSessionModelRef(
   agentId?: string,
 ): { provider: string; model: string } {
   const resolved = agentId
-    ? resolveDefaultModelForAgent({ cfg, agentId })
+    ? resolveDefaultModelForAgent({ cfg, agentId, sessionEntry: entry })
     : resolveConfiguredModelRef({
         cfg,
         defaultProvider: DEFAULT_PROVIDER,

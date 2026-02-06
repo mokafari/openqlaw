@@ -1,0 +1,89 @@
+{
+  "id": "memory-cognee",
+  "kind": "memory",
+  "uiHints": {
+    "llm.apiKey": {
+      "label": "LLM API Key",
+      "sensitive": true,
+      "placeholder": "sk-proj-... or ${OPENAI_API_KEY}",
+      "help": "API key for LLM provider (supports env var expansion)"
+    },
+    "llm.provider": {
+      "label": "LLM Provider",
+      "placeholder": "openai",
+      "help": "LLM provider: openai, anthropic, google, or ollama"
+    },
+    "llm.model": {
+      "label": "LLM Model",
+      "placeholder": "gpt-4o-mini",
+      "help": "Optional model override (uses provider default if not set)"
+    },
+    "dataDir": {
+      "label": "Data Directory",
+      "placeholder": "~/.openclaw/memory/cognee",
+      "advanced": true,
+      "help": "Directory where Cognee stores its data"
+    },
+    "vectorStore": {
+      "label": "Vector Store",
+      "placeholder": "qdrant",
+      "advanced": true,
+      "help": "Vector database backend (qdrant, lancedb, chroma, weaviate, pinecone)"
+    },
+    "graphStore": {
+      "label": "Graph Store",
+      "placeholder": "neo4j",
+      "advanced": true,
+      "help": "Graph database backend (neo4j or networkx)"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Automatically capture important information from conversations"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories into context"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "llm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "anthropic", "google", "ollama"]
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": ["apiKey"]
+      },
+      "dataDir": {
+        "type": "string"
+      },
+      "vectorStore": {
+        "type": "string",
+        "enum": ["qdrant", "lancedb", "chroma", "weaviate", "pinecone"]
+      },
+      "graphStore": {
+        "type": "string",
+        "enum": ["neo4j", "networkx"]
+      },
+      "autoCapture": {
+        "type": "boolean"
+      },
+      "autoRecall": {
+        "type": "boolean"
+      }
+    },
+    "required": ["llm"]
+  }
+}

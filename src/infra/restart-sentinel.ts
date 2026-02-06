@@ -27,8 +27,14 @@ export type RestartSentinelStats = {
   durationMs?: number | null;
 };
 
+export type DevSelfEditContinuation = {
+  editedFile: string;
+  taskSummary: string;
+  toolCallId?: string;
+};
+
 export type RestartSentinelPayload = {
-  kind: "config-apply" | "update" | "restart";
+  kind: "config-apply" | "update" | "restart" | "dev-self-edit";
   status: "ok" | "error" | "skipped";
   ts: number;
   sessionKey?: string;
@@ -43,6 +49,8 @@ export type RestartSentinelPayload = {
   message?: string | null;
   doctorHint?: string | null;
   stats?: RestartSentinelStats | null;
+  /** Continuation context for dev-self-edit restarts. */
+  continuation?: DevSelfEditContinuation | null;
 };
 
 export type RestartSentinel = {

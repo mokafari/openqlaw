@@ -511,6 +511,15 @@ export const chatHandlers: GatewayRequestHandlers = {
           disableBlockStreaming: true,
           onAgentRunStart: (runId) => {
             agentRunStarted = true;
+            // Register chat run link so agent events map to client runId
+            // The registry uses agent runId as the key to look up client runId
+            context.addChatRun(runId, {
+              sessionKey: p.sessionKey,
+              clientRunId,
+            });
+            context.logGateway.debug(
+              `chat.send: registered chat run link agentRunId=${runId} clientRunId=${clientRunId} sessionKey=${p.sessionKey}`,
+            );
             const connId = typeof client?.connId === "string" ? client.connId : undefined;
             const wantsToolEvents = hasGatewayClientCap(
               client?.connect?.caps,

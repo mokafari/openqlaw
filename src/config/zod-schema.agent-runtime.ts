@@ -543,6 +543,20 @@ export const ToolsSchema = z
       })
       .strict()
       .optional(),
+    evolution: z
+      .object({
+        selfModification: z
+          .object({
+            enabled: z.boolean().optional(),
+            policyPath: z.string().optional(),
+            maxConcurrentMutations: z.number().int().positive().optional(),
+            autoTrigger: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

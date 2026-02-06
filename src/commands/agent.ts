@@ -147,14 +147,14 @@ export async function agentCommand(
   const {
     sessionId,
     sessionKey,
-    sessionEntry: resolvedSessionEntry,
     sessionStore,
     storePath,
     isNewSession,
     persistedThinking,
     persistedVerbose,
   } = sessionResolution;
-  let sessionEntry = resolvedSessionEntry;
+  // Access sessionEntry directly to avoid TDZ issues with destructuring renaming
+  let sessionEntry: SessionEntry | undefined = sessionResolution.sessionEntry;
   const runId = opts.runId?.trim() || sessionId;
 
   try {

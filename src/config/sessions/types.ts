@@ -1,5 +1,6 @@
 import type { Skill } from "@mariozechner/pi-coding-agent";
 import crypto from "node:crypto";
+import type { AgentState } from "../../agents/fsm/states.js";
 import type { NormalizedChatType } from "../../channels/chat-type.js";
 import type { ChannelId } from "../../channels/plugins/types.js";
 import type { DeliveryContext } from "../../utils/delivery-context.js";
@@ -93,6 +94,14 @@ export type SessionEntry = {
   lastThreadId?: string | number;
   skillsSnapshot?: SessionSkillSnapshot;
   systemPromptReport?: SessionSystemPromptReport;
+  /** Current FSM state of the agent */
+  currentState?: AgentState;
+  /** Goal stack for multi-step task management */
+  goalStack?: GoalStackEntry;
+  /** Last detected task complexity (0.0 to 1.0) */
+  lastComplexity?: number;
+  /** Last detected user urgency (0.0 to 1.0) */
+  lastUrgency?: number;
 };
 
 export function mergeSessionEntry(
@@ -161,6 +170,22 @@ export type SessionSystemPromptReport = {
       propertiesCount?: number | null;
     }>;
   };
+};
+
+export type GoalStackEntry = {
+  goals: Goal[];
+  updatedAt: number;
+};
+
+export type Goal = {
+  id: string;
+  type: "task" | "obstacle" | "subgoal";
+  description: string;
+  status: "pending" | "active" | "blocked" | "completed" | "failed";
+  parentId?: string;
+  blockedBy?: string; // ID of blocking obstacle
+  createdAt: number;
+  resolvedAt?: number;
 };
 
 export const DEFAULT_RESET_TRIGGER = "/new";

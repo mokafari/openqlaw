@@ -173,6 +173,10 @@ const FIELD_LABELS: Record<string, string> = {
   "agents.list[].tools.byProvider": "Agent Tool Policy by Provider",
   "tools.exec.applyPatch.enabled": "Enable apply_patch",
   "tools.exec.applyPatch.allowModels": "apply_patch Model Allowlist",
+  "tools.evolution.selfModification.enabled": "Enable Self-Modification",
+  "tools.evolution.selfModification.policyPath": "Self-Modification Policy Path",
+  "tools.evolution.selfModification.maxConcurrentMutations": "Max Concurrent Mutations",
+  "tools.evolution.selfModification.autoTrigger": "Auto-Trigger Mutation Cycle",
   "tools.exec.notifyOnExit": "Exec Notify On Exit",
   "tools.exec.approvalRunningNoticeMs": "Exec Approval Running Notice (ms)",
   "tools.exec.host": "Exec Host",
@@ -452,6 +456,14 @@ const FIELD_HELP: Record<string, string> = {
     "Experimental. Enables apply_patch for OpenAI models when allowed by tool policy.",
   "tools.exec.applyPatch.allowModels":
     'Optional allowlist of model ids (e.g. "gpt-5.2" or "openai/gpt-5.2").',
+  "tools.evolution.selfModification.enabled":
+    "Enable autonomous self-modification capabilities. Allows agents to identify, diagnose, and fix bugs in their own codebase.",
+  "tools.evolution.selfModification.policyPath":
+    "Path to self-modification policy file (default: ~/.openclaw/evolution/self-modification-policy.json).",
+  "tools.evolution.selfModification.maxConcurrentMutations":
+    "Maximum number of concurrent mutations allowed (default: 1).",
+  "tools.evolution.selfModification.autoTrigger":
+    "Automatically trigger mutation cycle when tool error rate exceeds threshold (default: false).",
   "tools.exec.notifyOnExit":
     "When true (default), backgrounded exec sessions enqueue a system event and request a heartbeat on exit.",
   "tools.exec.pathPrepend": "Directories to prepend to PATH for exec runs (gateway/sandbox).",

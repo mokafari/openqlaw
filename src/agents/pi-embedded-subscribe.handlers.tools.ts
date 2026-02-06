@@ -171,6 +171,12 @@ export function handleToolExecutionEnd(
       meta,
       error: errorMessage,
     };
+    // Track tool error for telemetry
+    ctx.state.toolErrors.push({
+      toolName,
+      error: errorMessage ?? "Unknown error",
+      timestamp: Date.now(),
+    });
   }
 
   // Commit messaging tool text on success, discard on error.

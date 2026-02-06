@@ -138,7 +138,7 @@ async function resolveContextReport(
     : { enabled: false };
   const ttsHint = params.cfg ? buildTtsSystemPromptHint(params.cfg) : undefined;
 
-  const systemPrompt = buildAgentSystemPrompt({
+  const basePrompt = await buildAgentSystemPrompt({
     workspaceDir,
     defaultThinkLevel: params.resolvedThinkLevel,
     reasoningLevel: params.resolvedReasoningLevel,
@@ -159,6 +159,15 @@ async function resolveContextReport(
     sandboxInfo,
     memoryCitationsMode: params.cfg?.memory?.citations,
   });
+
+  // Apply evolution genotype modifications (non-blocking, falls back gracefully)
+  let systemPrompt = basePrompt;
+  try {
+    const { applyCurrentGenotypeToPrompt } = await import("../../agents/evolution/integration.js");
+    systemPrompt = await applyCurrentGenotypeToPrompt(basePrompt);
+  } catch {
+    // Evolution module not available or failed to load - use base prompt
+  }
 
   return buildSystemPromptReport({
     source: "estimate",

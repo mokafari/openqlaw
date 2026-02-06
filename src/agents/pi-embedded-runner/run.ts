@@ -662,6 +662,35 @@ export async function runEmbeddedPiAgent(
               agentDir: params.agentDir,
             });
           }
+
+          // Log evolution telemetry (non-blocking)
+          try {
+            const { logAgentRunTelemetry } = await import("../evolution/integration.js");
+            await logAgentRunTelemetry({
+              sessionId: sessionIdUsed,
+              sessionKey: params.sessionKey,
+              meta: {
+                durationMs: Date.now() - started,
+                agentMeta,
+                aborted,
+                systemPromptReport: attempt.systemPromptReport,
+                error: attempt.promptError
+                  ? {
+                      kind: "context_overflow",
+                      message: String(attempt.promptError),
+                    }
+                  : undefined,
+              },
+              agentMeta,
+              toolMetas: attempt.toolMetas,
+              toolErrors: attempt.toolErrors,
+            }).catch((err) => {
+              log.debug(`evolution telemetry failed: ${String(err)}`);
+            });
+          } catch {
+            // Evolution module not available or failed to load - ignore
+          }
+
           return {
             payloads: payloads.length ? payloads : undefined,
             meta: {

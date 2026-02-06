@@ -3,6 +3,7 @@ import type { ThinkLevel } from "../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { EmbeddedPiRunResult } from "./pi-embedded-runner.js";
 import { resolveHeartbeatPrompt } from "../auto-reply/heartbeat.js";
+import { loadSessionEntry } from "../gateway/session-utils.js";
 import { shouldLogVerbose } from "../globals.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -92,7 +93,12 @@ export async function runCliAgent(params: {
     cwd: process.cwd(),
     moduleUrl: import.meta.url,
   });
-  const systemPrompt = buildSystemPrompt({
+
+  const { entry: sessionEntry } = params.sessionKey
+    ? loadSessionEntry(params.sessionKey)
+    : { entry: undefined };
+
+  const systemPrompt = await buildSystemPrompt({
     workspaceDir,
     config: params.config,
     defaultThinkLevel: params.thinkLevel,
@@ -104,6 +110,7 @@ export async function runCliAgent(params: {
     contextFiles,
     modelDisplay,
     agentId: sessionAgentId,
+    sessionEntry,
   });
 
   const { sessionId: cliSessionIdToSend, isNew } = resolveSessionIdToSend({

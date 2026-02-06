@@ -10,6 +10,7 @@ import { resolveModelRefFromString } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { DEFAULT_AGENT_WORKSPACE_DIR, ensureAgentWorkspace } from "../../agents/workspace.js";
 import { type OpenClawConfig, loadConfig } from "../../config/config.js";
+import { processReflexes } from "../../gateway/reflexes/index.js";
 import { applyLinkUnderstanding } from "../../link-understanding/apply.js";
 import { applyMediaUnderstanding } from "../../media-understanding/apply.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -72,24 +73,33 @@ export async function getReplyFromConfig(
     mergedSkillFilter !== undefined ? { ...opts, skillFilter: mergedSkillFilter } : opts;
   const agentCfg = cfg.agents?.defaults;
   const sessionCfg = cfg.session;
-  const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
-    cfg,
-    agentId,
-  });
-  let provider = defaultProvider;
-  let model = defaultModel;
-  if (opts?.isHeartbeat) {
-    const heartbeatRaw = agentCfg?.heartbeat?.model?.trim() ?? "";
-    const heartbeatRef = heartbeatRaw
-      ? resolveModelRefFromString({
-          raw: heartbeatRaw,
-          defaultProvider,
-          aliasIndex,
-        })
-      : null;
-    if (heartbeatRef) {
-      provider = heartbeatRef.ref.provider;
-      model = heartbeatRef.ref.model;
+
+  // Check reflexes before processing
+  const messageBody = ctx.Body?.trim() ?? ctx.RawBody?.trim() ?? "";
+  if (messageBody) {
+    const reflexResult = processReflexes(messageBody);
+    if (reflexResult?.handled) {
+      if (reflexResult.action === "abort") {
+        // Stop command - return early
+        return { text: "Stopped." };
+      }
+      if (reflexResult.action === "blocked") {
+        // Safety block - return error
+        return { text: `⚠️ ${reflexResult.reason ?? "Request blocked for safety"}` };
+      }
+      if (reflexResult.response) {
+        // Simple response from priority reflex
+        return { text: reflexResult.response };
+      }
+      if (reflexResult.action === "time") {
+        // Time query - handle with simple response
+        const now = new Date();
+        return { text: `Current time: ${now.toLocaleString()}` };
+      }
+      if (reflexResult.action === "status") {
+        // Status query - let it proceed to normal processing
+        // (status tool will handle it)
+      }
     }
   }
 
@@ -114,19 +124,6 @@ export async function getReplyFromConfig(
   opts?.onTypingController?.(typing);
 
   const finalized = finalizeInboundContext(ctx);
-
-  if (!isFastTestEnv) {
-    await applyMediaUnderstanding({
-      ctx: finalized,
-      cfg,
-      agentDir,
-      activeModel: { provider, model },
-    });
-    await applyLinkUnderstanding({
-      ctx: finalized,
-      cfg,
-    });
-  }
 
   const commandAuthorized = finalized.CommandAuthorized;
   resolveCommandAuthorization({
@@ -157,6 +154,41 @@ export async function getReplyFromConfig(
     triggerBodyNormalized,
     bodyStripped,
   } = sessionState;
+
+  const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
+    cfg,
+    agentId,
+    sessionEntry,
+  });
+  let provider = defaultProvider;
+  let model = defaultModel;
+  if (opts?.isHeartbeat) {
+    const heartbeatRaw = agentCfg?.heartbeat?.model?.trim() ?? "";
+    const heartbeatRef = heartbeatRaw
+      ? resolveModelRefFromString({
+          raw: heartbeatRaw,
+          defaultProvider,
+          aliasIndex,
+        })
+      : null;
+    if (heartbeatRef) {
+      provider = heartbeatRef.ref.provider;
+      model = heartbeatRef.ref.model;
+    }
+  }
+
+  if (!isFastTestEnv) {
+    await applyMediaUnderstanding({
+      ctx: finalized,
+      cfg,
+      agentDir,
+      activeModel: { provider, model },
+    });
+    await applyLinkUnderstanding({
+      ctx: finalized,
+      cfg,
+    });
+  }
 
   await applyResetModelOverride({
     cfg,

@@ -24,6 +24,21 @@ export async function scheduleRestartSentinelWake(params: { deps: CliDeps }) {
   const message = formatRestartSentinelMessage(payload);
   const summary = summarizeRestartSentinel(payload);
 
+  // Dev-self-edit restarts are local-only — inject a continuation prompt via system event
+  if (payload.kind === "dev-self-edit") {
+    const cont = payload.continuation;
+    const target = sessionKey || resolveMainSessionKeyFromConfig();
+    const lines = [
+      "[Dev Server Restart — Self-Edit Recovery]",
+      cont?.editedFile ? `The dev server restarted because you edited: ${cont.editedFile}` : null,
+      cont?.taskSummary ? `You were working on: ${cont.taskSummary}` : null,
+      target ? `Previous session: ${target}` : null,
+      "Please continue where you left off.",
+    ].filter(Boolean);
+    enqueueSystemEvent(lines.join("\n"), { sessionKey: target });
+    return;
+  }
+
   if (!sessionKey) {
     const mainSessionKey = resolveMainSessionKeyFromConfig();
     enqueueSystemEvent(message, { sessionKey: mainSessionKey });

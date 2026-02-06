@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ThinkLevel } from "./directives.js";
+import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { clearSessionAuthProfileOverride } from "../../agents/auth-profiles/session-override.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -9,6 +10,7 @@ import {
   type ModelAliasIndex,
   modelKey,
   normalizeProviderId,
+  resolveDefaultModelForAgent,
   resolveModelRefFromString,
   resolveThinkingDefault,
 } from "../../agents/model-selection.js";
@@ -271,6 +273,7 @@ export async function createModelSelectionState(params: {
   provider: string;
   model: string;
   hasModelDirective: boolean;
+  prompt?: string;
 }): Promise<ModelSelectionState> {
   const {
     cfg,
@@ -284,8 +287,16 @@ export async function createModelSelectionState(params: {
     defaultModel,
   } = params;
 
-  let provider = params.provider;
-  let model = params.model;
+  const activeAgentId = sessionKey ? resolveSessionAgentId({ sessionKey, config: cfg }) : undefined;
+  const initialModel = resolveDefaultModelForAgent({
+    cfg,
+    agentId: activeAgentId,
+    sessionEntry,
+    prompt: params.prompt,
+  });
+
+  let provider = params.hasModelDirective ? params.provider : initialModel.provider;
+  let model = params.hasModelDirective ? params.model : initialModel.model;
 
   const hasAllowlist = agentCfg?.models && Object.keys(agentCfg.models).length > 0;
   const initialStoredOverride = resolveStoredModelOverride({

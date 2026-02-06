@@ -29,6 +29,7 @@ import {
 } from "../../channel-tools.js";
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
 import { isTimeoutError } from "../../failover-error.js";
+import { renderGoalStackSummary } from "../../goals/visualizer.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
 import { resolveDefaultModelForAgent } from "../../model-selection.js";
 import {
@@ -44,6 +45,11 @@ import {
 } from "../../pi-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools } from "../../pi-tools.js";
+import {
+  initializeQuakeIntegration,
+  persistQuakeIntegration,
+  type QuakeIntegrationContext,
+} from "../../quake-integration.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
@@ -317,6 +323,7 @@ export async function runEmbeddedAttempt(
     const defaultModelRef = resolveDefaultModelForAgent({
       cfg: params.config ?? {},
       agentId: sessionAgentId,
+      prompt: params.prompt,
     });
     const defaultModelLabel = `${defaultModelRef.provider}/${defaultModelRef.model}`;
     const { runtimeInfo, userTimezone, userTime, userTimeFormat } = buildSystemPromptParams({
@@ -346,7 +353,27 @@ export async function runEmbeddedAttempt(
     });
     const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
 
-    const appendPrompt = buildEmbeddedSystemPrompt({
+    // Initialize Quake Bot integration (FSM, Goal Stack, etc.)
+    let quakeContext: QuakeIntegrationContext | undefined;
+    let fsmState: string | undefined;
+    let goalStackSummary: string | undefined;
+    try {
+      const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
+      quakeContext = await initializeQuakeIntegration({
+        sessionId: params.sessionKey ?? params.sessionId,
+        sessionDir: agentDir,
+        workspaceDir: effectiveWorkspace,
+      });
+      fsmState = quakeContext.fsmManager.getState();
+      if (!quakeContext.goalStack.isEmpty()) {
+        goalStackSummary = renderGoalStackSummary(quakeContext.goalStack);
+      }
+    } catch (err) {
+      // Non-fatal: Quake integration is optional
+      log.debug(`Quake integration init failed (non-fatal): ${err}`);
+    }
+
+    const appendPrompt = await buildEmbeddedSystemPrompt({
       workspaceDir: effectiveWorkspace,
       defaultThinkLevel: params.thinkLevel,
       reasoningLevel: params.reasoningLevel ?? "off",
@@ -372,6 +399,10 @@ export async function runEmbeddedAttempt(
       userTimeFormat,
       contextFiles,
       memoryCitationsMode: params.config?.memory?.citations,
+      sessionKey: params.sessionKey,
+      // Quake Bot integration params
+      fsmState,
+      goalStackSummary,
     });
     const systemPromptReport = buildSystemPromptReport({
       source: "run",
@@ -648,6 +679,7 @@ export async function runEmbeddedAttempt(
         getMessagingToolSentTargets,
         didSendViaMessagingTool,
         getLastToolError,
+        getToolErrors,
       } = subscription;
 
       const queueHandle: EmbeddedPiQueueHandle = {
@@ -867,6 +899,11 @@ export async function runEmbeddedAttempt(
         }
         unsubscribe();
         clearActiveEmbeddedRun(params.sessionId, queueHandle);
+        if (quakeContext) {
+          await persistQuakeIntegration(quakeContext).catch((err) => {
+            log.warn(`Quake integration persist failed (non-fatal): ${err}`);
+          });
+        }
         params.abortSignal?.removeEventListener?.("abort", onAbort);
       }
 
@@ -893,6 +930,7 @@ export async function runEmbeddedAttempt(
         toolMetas: toolMetasNormalized,
         lastAssistant,
         lastToolError: getLastToolError?.(),
+        toolErrors: getToolErrors?.(),
         didSendViaMessagingTool: didSendViaMessagingTool(),
         messagingToolSentTexts: getMessagingToolSentTexts(),
         messagingToolSentTargets: getMessagingToolSentTargets(),

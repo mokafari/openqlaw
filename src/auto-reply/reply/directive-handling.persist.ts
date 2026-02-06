@@ -227,7 +227,16 @@ export async function persistInlineDirectives(params: {
   };
 }
 
-export function resolveDefaultModel(params: { cfg: OpenClawConfig; agentId?: string }): {
+export function resolveDefaultModel(params: {
+  cfg: OpenClawConfig;
+  agentId?: string;
+  sessionEntry?: {
+    usage?: { totalTokens?: number };
+    contextTokens?: number;
+    lastUrgency?: number;
+    lastComplexity?: number;
+  };
+}): {
   defaultProvider: string;
   defaultModel: string;
   aliasIndex: ModelAliasIndex;
@@ -235,6 +244,7 @@ export function resolveDefaultModel(params: { cfg: OpenClawConfig; agentId?: str
   const mainModel = resolveDefaultModelForAgent({
     cfg: params.cfg,
     agentId: params.agentId,
+    sessionEntry: params.sessionEntry,
   });
   const defaultProvider = mainModel.provider;
   const defaultModel = mainModel.model;

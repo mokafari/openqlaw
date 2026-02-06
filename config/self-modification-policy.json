@@ -1,0 +1,29 @@
+{
+  "policy_name": "OpenClaw Self-Modification Policy",
+  "version": "1.0.0",
+  "rules": {
+    "allowed_paths": [
+      "src/agents/tools/*.ts",
+      "src/agents/evolution/*.ts",
+      "src/utils/*.ts",
+      "src/agents/pi-embedded-helpers.ts"
+    ],
+    "blocked_paths": [
+      "src/agents/security/*",
+      "src/agents/fsm/*",
+      "src/infra/*",
+      ".env*",
+      "*.pem",
+      "*.key",
+      "package-lock.json",
+      "pnpm-lock.yaml"
+    ],
+    "allowed_dependencies": ["zod", "typebox", "lodash", "date-fns"]
+  },
+  "safety": {
+    "require_dojo_pass": true,
+    "require_build_pass": true,
+    "max_patch_size_bytes": 50000,
+    "forbidden_keywords": ["process.env", "eval(", "ChildProcess.execSync"]
+  }
+}

@@ -20,12 +20,19 @@ export type ToolErrorSummary = {
   error?: string;
 };
 
+export type ToolErrorRecord = {
+  toolName: string;
+  error: string;
+  timestamp: number;
+};
+
 export type EmbeddedPiSubscribeState = {
   assistantTexts: string[];
   toolMetas: Array<{ toolName?: string; meta?: string }>;
   toolMetaById: Map<string, string | undefined>;
   toolSummaryById: Set<string>;
   lastToolError?: ToolErrorSummary;
+  toolErrors: ToolErrorRecord[]; // Track all tool errors for telemetry
 
   blockReplyBreak: "text_end" | "message_end";
   reasoningMode: ReasoningLevel;

@@ -1,9 +1,9 @@
-# 🦞 OpenClaw — Personal AI Assistant
+# 🎮 OpenQlaw — Personal AI Assistant with Quake Bot Engine
 
 <p align="center">
     <picture>
         <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.png">
-        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.png" alt="OpenClaw" width="500">
+        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.png" alt="OpenQLaw" width="500">
     </picture>
 </p>
 
@@ -12,22 +12,39 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/openclaw/openclaw/actions/workflows/ci.yml?branch=main"><img src="https://img.shields.io/github/actions/workflow/status/openclaw/openclaw/ci.yml?branch=main&style=for-the-badge" alt="CI status"></a>
-  <a href="https://github.com/openclaw/openclaw/releases"><img src="https://img.shields.io/github/v/release/openclaw/openclaw?include_prereleases&style=for-the-badge" alt="GitHub release"></a>
-  <a href="https://discord.gg/clawd"><img src="https://img.shields.io/discord/1456350064065904867?label=Discord&logo=discord&logoColor=white&color=5865F2&style=for-the-badge" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://img.shields.io/badge/Fork-OpenClaw-orange?style=for-the-badge" alt="Fork"></a>
+  <a href="docs/quake-bot-engine.md"><img src="https://img.shields.io/badge/Quake-Engine-red?style=for-the-badge" alt="Quake Engine"></a>
 </p>
 
-**OpenClaw** is a _personal AI assistant_ you run on your own devices.
-It answers you on the channels you already use (WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, Microsoft Teams, WebChat), plus extension channels like BlueBubbles, Matrix, Zalo, and Zalo Personal. It can speak and listen on macOS/iOS/Android, and can render a live Canvas you control. The Gateway is just the control plane — the product is the assistant.
+**OpenQLaw** is a fork of [OpenClaw](https://github.com/openclaw/openclaw) enhanced with the **Quake III Arena Bot Engine** — a complete architectural layer that brings structured autonomy to LLM agents.
 
-If you want a personal, single-user assistant that feels local, fast, and always-on, this is it.
+This fork integrates the 2001 research paper _"The Quake III Arena Bot"_ by J.M.P. van Waveren, adapting its Area Awareness System (AAS), Finite State Machine, Goal Stack, Fuzzy Logic, and Camping mechanics to create agents that operate with pre-computed awareness rather than reactive token prediction.
 
-[Website](https://openclaw.ai) · [Docs](https://docs.openclaw.ai) · [DeepWiki](https://deepwiki.com/openclaw/openclaw) · [Getting Started](https://docs.openclaw.ai/start/getting-started) · [Updating](https://docs.openclaw.ai/install/updating) · [Showcase](https://docs.openclaw.ai/start/showcase) · [FAQ](https://docs.openclaw.ai/start/faq) · [Wizard](https://docs.openclaw.ai/start/wizard) · [Nix](https://github.com/openclaw/nix-clawdbot) · [Docker](https://docs.openclaw.ai/install/docker) · [Discord](https://discord.gg/clawd)
+**Key Features:**
+
+- 🗺️ **Area Awareness System (AAS)** — Pre-computed navigation mesh for OS/API surface reachability
+- 🧠 **4-Layer Brain Architecture** — Reflex/Fuzzy/FSM/Orchestrator decision layers
+- 📚 **Goal Stack** — LIFO recursive task resolution with obstacle handling
+- 🎯 **Fuzzy Model Selector** — Dynamic model selection based on task complexity
+- ⛺ **Camping State** — Event-driven waiting for long-running processes
+- 🎭 **Personality System** — SOUL.md integration with contextual triggers
+- 🧬 **Self-Evolution** — Genetic selection for offline agent optimization
+
+**OpenQLaw** is a _personal AI assistant_ you run on your own devices. It answers you on the channels you already use (WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMessage, Microsoft Teams, WebChat), plus extension channels like BlueBubbles, Matrix, Zalo, and Zalo Personal. It can speak and listen on macOS/iOS/Android, and can render a live Canvas you control. The Gateway is just the control plane — the product is the assistant.
+
+If you want a personal, single-user assistant that feels local, fast, always-on, and operates with structured autonomy, this is it.
+
+📖 **Full Documentation:** See [`docs/quake-bot-engine.md`](docs/quake-bot-engine.md) for complete technical details on the Quake engine integration.
+
+**This is a fork of [OpenClaw](https://github.com/openclaw/openclaw) with Quake Bot Engine integration.**
+
+Original project: [openclaw.ai](https://openclaw.ai) · [Original Docs](https://docs.openclaw.ai) · [Discord](https://discord.gg/clawd)
+
+**Quake Engine Documentation:** [`docs/quake-bot-engine.md`](docs/quake-bot-engine.md) — Complete technical reference for the Quake III Arena Bot integration.
 
 Preferred setup: run the onboarding wizard (`openclaw onboard`). It walks through gateway, workspace, channels, and skills. The CLI wizard is the recommended path and works on **macOS, Linux, and Windows (via WSL2; strongly recommended)**.
 Works with npm, pnpm, or bun.
-New install? Start here: [Getting started](https://docs.openclaw.ai/start/getting-started)
 
 **Subscriptions (OAuth):**
 
@@ -46,10 +63,12 @@ Model note: while any model is supported, I strongly recommend **Anthropic Pro/M
 Runtime: **Node ≥22**.
 
 ```bash
-npm install -g openclaw@latest
-# or: pnpm add -g openclaw@latest
-
-openclaw onboard --install-daemon
+# Install from source (this fork)
+git clone <your-fork-url>
+cd openqlaw
+pnpm install
+pnpm build
+pnpm openclaw onboard --install-daemon
 ```
 
 The wizard installs the Gateway daemon (launchd/systemd user service) so it stays running.
@@ -66,13 +85,16 @@ openclaw onboard --install-daemon
 openclaw gateway --port 18789 --verbose
 
 # Send a message
-openclaw message send --to +1234567890 --message "Hello from OpenClaw"
+openclaw message send --to +1234567890 --message "Hello from OpenQlaw"
 
 # Talk to the assistant (optionally deliver back to any connected channel: WhatsApp/Telegram/Slack/Discord/Google Chat/Signal/iMessage/BlueBubbles/Microsoft Teams/Matrix/Zalo/Zalo Personal/WebChat)
 openclaw agent --message "Ship checklist" --thinking high
+
+# Check Quake engine status
+openclaw evolution status
 ```
 
-Upgrading? [Updating guide](https://docs.openclaw.ai/install/updating) (and run `openclaw doctor`).
+Upgrading? Pull latest from your fork and rebuild (run `openclaw doctor` to check health).
 
 ## Development channels
 
@@ -88,8 +110,8 @@ Details: [Development channels](https://docs.openclaw.ai/install/development-cha
 Prefer `pnpm` for builds from source. Bun is optional for running TypeScript directly.
 
 ```bash
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+git clone <your-fork-url>
+cd openqlaw
 
 pnpm install
 pnpm ui:build # auto-installs UI deps on first run
@@ -103,9 +125,20 @@ pnpm gateway:watch
 
 Note: `pnpm openclaw ...` runs TypeScript directly (via `tsx`). `pnpm build` produces `dist/` for running via Node / the packaged `openclaw` binary.
 
+**Quake Engine Components:** All Quake integration code lives in `src/agents/`:
+
+- `aas/` — Area Awareness System
+- `fsm/` — Finite State Machine
+- `goals/` — Goal Stack
+- `fuzzy-selector.ts` — Fuzzy model selection
+- `camping.ts` — Camping state manager
+- `personality/` — SOUL.md integration
+- `evolution/` — Self-evolution system
+- `quake-integration.ts` — Main integration helper
+
 ## Security defaults (DM access)
 
-OpenClaw connects to real messaging surfaces. Treat inbound DMs as **untrusted input**.
+OpenQLaw connects to real messaging surfaces. Treat inbound DMs as **untrusted input**.
 
 Full security guide: [Security](https://docs.openclaw.ai/gateway/security)
 
@@ -119,6 +152,7 @@ Run `openclaw doctor` to surface risky/misconfigured DM policies.
 
 ## Highlights
 
+- **[Quake Bot Engine](docs/quake-bot-engine.md)** — Complete integration of Quake III Arena Bot architecture (AAS, FSM, Goal Stack, Fuzzy Logic, Camping, Self-Evolution)
 - **[Local-first Gateway](https://docs.openclaw.ai/gateway)** — single control plane for sessions, channels, tools, and events.
 - **[Multi-channel inbox](https://docs.openclaw.ai/channels)** — WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, BlueBubbles (iMessage), iMessage (legacy), Microsoft Teams, Matrix, Zalo, Zalo Personal, WebChat, macOS, iOS/Android.
 - **[Multi-agent routing](https://docs.openclaw.ai/gateway/configuration)** — route inbound channels/accounts/peers to isolated agents (workspaces + per-agent sessions).
@@ -188,8 +222,13 @@ WhatsApp / Telegram / Slack / Discord / Google Chat / Signal / iMessage / BlueBu
 │     ws://127.0.0.1:18789      │
 └──────────────┬────────────────┘
                │
-               ├─ Pi agent (RPC)
-               ├─ CLI (openclaw …)
+               ├─ Pi agent (RPC) + Quake Engine
+               │  ├─ AAS (Area Awareness)
+               │  ├─ FSM (State Machine)
+               │  ├─ Goal Stack
+               │  ├─ Fuzzy Selector
+               │  └─ Evolution System
+               ├─ CLI (openqlaw …)
                ├─ WebChat UI
                ├─ macOS app
                └─ iOS / Android nodes
@@ -206,7 +245,7 @@ WhatsApp / Telegram / Slack / Discord / Google Chat / Signal / iMessage / BlueBu
 
 ## Tailscale access (Gateway dashboard)
 
-OpenClaw can auto-configure Tailscale **Serve** (tailnet-only) or **Funnel** (public) while the Gateway stays bound to loopback. Configure `gateway.tailscale.mode`:
+OpenQLaw can auto-configure Tailscale **Serve** (tailnet-only) or **Funnel** (public) while the Gateway stays bound to loopback. Configure `gateway.tailscale.mode`:
 
 - `off`: no Tailscale automation (default).
 - `serve`: tailnet-only HTTPS via `tailscale serve` (uses Tailscale identity headers by default).
@@ -214,7 +253,7 @@ OpenClaw can auto-configure Tailscale **Serve** (tailnet-only) or **Funnel** (pu
 
 Notes:
 
-- `gateway.bind` must stay `loopback` when Serve/Funnel is enabled (OpenClaw enforces this).
+- `gateway.bind` must stay `loopback` when Serve/Funnel is enabled (OpenQLaw enforces this).
 - Serve can be forced to require a password by setting `gateway.auth.mode: "password"` or `gateway.auth.allowTailscale: false`.
 - Funnel refuses to start unless `gateway.auth.mode: "password"` is set.
 - Optional: `gateway.tailscale.resetOnExit` to undo Serve/Funnel on shutdown.
@@ -308,6 +347,7 @@ Runbook: [iOS connect](https://docs.openclaw.ai/platforms/ios).
 - Workspace root: `~/.openclaw/workspace` (configurable via `agents.defaults.workspace`).
 - Injected prompt files: `AGENTS.md`, `SOUL.md`, `TOOLS.md`.
 - Skills: `~/.openclaw/workspace/skills/<skill>/SKILL.md`.
+- **Quake Engine State:** FSM state, goal stack, camping state, and evolution genotypes stored in session directories.
 
 ## Configuration
 
@@ -474,7 +514,24 @@ Use these when you’re past the onboarding flow and want the deeper reference.
 
 - [docs.openclaw.ai/gmail-pubsub](https://docs.openclaw.ai/automation/gmail-pubsub)
 
-## Molty
+## About This Fork
+
+**OpenQLaw** is a fork of [OpenClaw](https://github.com/openclaw/openclaw) that integrates the **Quake III Arena Bot Engine** — a complete architectural layer inspired by the 2001 research paper by J.M.P. van Waveren.
+
+The Quake engine brings structured autonomy to LLM agents through:
+
+- Pre-computed Area Awareness System (AAS) for OS/API reachability
+- Explicit Finite State Machine with Quake-inspired nodes
+- LIFO Goal Stack for recursive task resolution
+- Fuzzy Logic for dynamic model selection
+- Camping state for event-driven waiting
+- Self-evolution system for offline optimization
+
+**Full Documentation:** [`docs/quake-bot-engine.md`](docs/quake-bot-engine.md)
+
+---
+
+## Original Project
 
 OpenClaw was built for **Molty**, a space lobster AI assistant. 🦞
 by Peter Steinberger and the community.

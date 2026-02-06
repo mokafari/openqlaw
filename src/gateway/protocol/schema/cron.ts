@@ -101,6 +101,20 @@ export const CronJobStateSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const CronJobMetadataSchema = Type.Object(
+  {
+    condition: Type.Optional(
+      Type.Object({
+        kind: Type.Literal("webhook"),
+        endpoint: NonEmptyString,
+        filter: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      }),
+    ),
+    camping: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: true },
+);
+
 export const CronJobSchema = Type.Object(
   {
     id: NonEmptyString,
@@ -116,6 +130,7 @@ export const CronJobSchema = Type.Object(
     wakeMode: Type.Union([Type.Literal("next-heartbeat"), Type.Literal("now")]),
     payload: CronPayloadSchema,
     delivery: Type.Optional(CronDeliverySchema),
+    metadata: Type.Optional(CronJobMetadataSchema),
     state: CronJobStateSchema,
   },
   { additionalProperties: false },
@@ -142,6 +157,7 @@ export const CronAddParamsSchema = Type.Object(
     wakeMode: Type.Union([Type.Literal("next-heartbeat"), Type.Literal("now")]),
     payload: CronPayloadSchema,
     delivery: Type.Optional(CronDeliverySchema),
+    metadata: Type.Optional(CronJobMetadataSchema),
   },
   { additionalProperties: false },
 );

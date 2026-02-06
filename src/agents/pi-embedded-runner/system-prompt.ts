@@ -8,7 +8,7 @@ import type { ReasoningLevel, ThinkLevel } from "./utils.js";
 import { buildAgentSystemPrompt, type PromptMode } from "../system-prompt.js";
 import { buildToolSummaryMap } from "../tool-summaries.js";
 
-export function buildEmbeddedSystemPrompt(params: {
+export async function buildEmbeddedSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
@@ -48,8 +48,15 @@ export function buildEmbeddedSystemPrompt(params: {
   userTimeFormat?: ResolvedTimeFormat;
   contextFiles?: EmbeddedContextFile[];
   memoryCitationsMode?: MemoryCitationsMode;
-}): string {
-  return buildAgentSystemPrompt({
+  sessionKey?: string;
+  /** FSM state for Quake Bot integration */
+  fsmState?: string;
+  /** Goal stack summary for Quake Bot integration */
+  goalStackSummary?: string;
+  /** Active tool clusters for Quake Bot integration */
+  activeClusters?: string[];
+}): Promise<string> {
+  const basePrompt = await buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
     defaultThinkLevel: params.defaultThinkLevel,
     reasoningLevel: params.reasoningLevel,
@@ -74,13 +81,26 @@ export function buildEmbeddedSystemPrompt(params: {
     userTimeFormat: params.userTimeFormat,
     contextFiles: params.contextFiles,
     memoryCitationsMode: params.memoryCitationsMode,
+    // Pass through Quake Bot integration params
+    fsmState: params.fsmState,
+    goalStackSummary: params.goalStackSummary,
+    activeClusters: params.activeClusters,
   });
+
+  // Apply evolution genotype modifications (non-blocking, falls back gracefully)
+  try {
+    const { applyCurrentGenotypeToPrompt } = await import("../evolution/integration.js");
+    return await applyCurrentGenotypeToPrompt(basePrompt);
+  } catch {
+    // Evolution module not available or failed to load - return base prompt
+    return basePrompt;
+  }
 }
 
 export function createSystemPromptOverride(
   systemPrompt: string,
 ): (defaultPrompt?: string) => string {
-  const override = systemPrompt.trim();
+  const override = (typeof systemPrompt === "string" ? systemPrompt : "").trim();
   return (_defaultPrompt?: string) => override;
 }
 

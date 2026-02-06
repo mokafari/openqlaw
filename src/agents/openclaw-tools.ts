@@ -7,7 +7,19 @@ import { createAgentsListTool } from "./tools/agents-list-tool.js";
 import { createBrowserTool } from "./tools/browser-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
 import { createCronTool } from "./tools/cron-tool.js";
+import {
+  createEvolutionProposePatchTool,
+  createEvolutionRunDojoTestTool,
+  createEvolutionListPatchesTool,
+} from "./tools/evolution-tools.js";
 import { createGatewayTool } from "./tools/gateway-tool.js";
+import {
+  createGoalPushTool,
+  createGoalPopTool,
+  createGoalStatusTool,
+  createGoalBlockTool,
+  createGoalUnblockTool,
+} from "./tools/goal-tools.js";
 import { createImageTool } from "./tools/image-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
@@ -143,10 +155,44 @@ export function createOpenClawTools(options?: {
       agentSessionKey: options?.agentSessionKey,
       config: options?.config,
     }),
+    createGoalPushTool({
+      agentSessionKey: options?.agentSessionKey,
+    }),
+    createGoalPopTool({
+      agentSessionKey: options?.agentSessionKey,
+    }),
+    createGoalStatusTool({
+      agentSessionKey: options?.agentSessionKey,
+    }),
+    createGoalBlockTool({
+      agentSessionKey: options?.agentSessionKey,
+    }),
+    createGoalUnblockTool({
+      agentSessionKey: options?.agentSessionKey,
+    }),
     ...(webSearchTool ? [webSearchTool] : []),
     ...(webFetchTool ? [webFetchTool] : []),
     ...(imageTool ? [imageTool] : []),
   ];
+
+  // Add evolution tools if self-modification is enabled
+  const evolutionEnabled = options?.config?.tools?.evolution?.selfModification?.enabled ?? false;
+  if (evolutionEnabled) {
+    tools.push(
+      createEvolutionProposePatchTool({
+        sessionKey: options?.agentSessionKey,
+        workspaceDir: options?.workspaceDir,
+        policyPath: options?.config?.tools?.evolution?.selfModification?.policyPath,
+      }),
+      createEvolutionRunDojoTestTool({
+        sessionKey: options?.agentSessionKey,
+        workspaceDir: options?.workspaceDir,
+      }),
+      createEvolutionListPatchesTool({
+        sessionKey: options?.agentSessionKey,
+      }),
+    );
+  }
 
   const pluginTools = resolvePluginTools({
     context: {

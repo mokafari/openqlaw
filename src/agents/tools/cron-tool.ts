@@ -13,7 +13,17 @@ import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-h
 // contain nested unions. Tool schemas need to stay provider-friendly, so we
 // accept "any object" here and validate at runtime.
 
-const CRON_ACTIONS = ["status", "list", "add", "update", "remove", "run", "runs", "wake"] as const;
+const CRON_ACTIONS = [
+  "status",
+  "list",
+  "add",
+  "update",
+  "remove",
+  "run",
+  "runs",
+  "wake",
+  "camp",
+] as const;
 
 const CRON_WAKE_MODES = ["now", "next-heartbeat"] as const;
 
@@ -38,6 +48,10 @@ const CronToolSchema = Type.Object({
   contextMessages: Type.Optional(
     Type.Number({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
   ),
+  // Camp action parameters
+  condition: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  wakeMessage: Type.Optional(Type.String()),
+  timeoutMinutes: Type.Optional(Type.Number()),
 });
 
 type CronToolOptions = {
@@ -168,6 +182,12 @@ ACTIONS:
 - run: Trigger job immediately (requires jobId)
 - runs: Get job run history (requires jobId)
 - wake: Send wake event (requires text, optional mode)
+- camp: Create a camping job that waits for a webhook event (requires condition, wakeMessage, optional timeoutMinutes)
+
+CAMP ACTION:
+Creates a one-shot job that waits for a webhook condition to be met.
+When the condition is triggered (via webhook), the agent will wake with wakeMessage.
+Example: { action: "camp", condition: { kind: "webhook", endpoint: "/hooks/github/pr-merged", filter: { repo: "owner/repo" } }, wakeMessage: "PR was merged", timeoutMinutes: 60 }
 
 JOB SCHEMA (for add action):
 {
@@ -314,6 +334,50 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
           return jsonResult(
             await callGatewayTool("wake", gatewayOpts, { mode, text }, { expectFinal: false }),
           );
+        }
+        case "camp": {
+          // Camping: Create a job that waits for a webhook event
+          const wakeMessage = readStringParam(params, "wakeMessage", { required: true });
+          const condition = params.condition;
+          const timeoutMinutes =
+            typeof params.timeoutMinutes === "number" ? params.timeoutMinutes : 60;
+
+          if (!condition || typeof condition !== "object") {
+            throw new Error(
+              "condition required for camp action (e.g., { kind: 'webhook', endpoint: '/hooks/github/pr-merged' })",
+            );
+          }
+
+          const cfg = loadConfig();
+          const agentId = opts?.agentSessionKey
+            ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+            : undefined;
+
+          // Create a one-shot job that will be triggered by webhook
+          // The job will run when the webhook condition is met
+          const campJob = {
+            name: `Camp: ${wakeMessage.slice(0, 50)}`,
+            description: `Camping job waiting for condition: ${JSON.stringify(condition)}`,
+            schedule: {
+              kind: "at" as const,
+              at: new Date(Date.now() + timeoutMinutes * 60 * 1000).toISOString(), // Timeout fallback
+            },
+            sessionTarget: "isolated" as const,
+            wakeMode: "now" as const,
+            payload: {
+              kind: "agentTurn" as const,
+              message: wakeMessage,
+            },
+            delivery: {
+              mode: "announce" as const,
+            },
+            enabled: true,
+            agentId,
+            // Store condition metadata (webhook system will handle actual triggering)
+            metadata: { condition, camping: true },
+          };
+
+          return jsonResult(await callGatewayTool("cron.add", gatewayOpts, campJob));
         }
         default:
           throw new Error(`Unknown action: ${action}`);

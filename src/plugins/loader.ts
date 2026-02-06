@@ -1,7 +1,7 @@
 import { createJiti } from "jiti";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { OpenClawConfig } from "../config/config.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import type {
@@ -208,12 +208,15 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   pushDiagnostics(registry.diagnostics, manifestRegistry.diagnostics);
 
   const pluginSdkAlias = resolvePluginSdkAlias();
+  if (pluginSdkAlias && !fs.existsSync(pluginSdkAlias)) {
+    logger.warn(`[plugins] plugin SDK alias resolved to non-existent path: ${pluginSdkAlias}`);
+  }
   const jiti = createJiti(import.meta.url, {
     interopDefault: true,
     extensions: [".ts", ".tsx", ".mts", ".cts", ".mtsx", ".ctsx", ".js", ".mjs", ".cjs", ".json"],
     ...(pluginSdkAlias
       ? {
-          alias: { "openclaw/plugin-sdk": pluginSdkAlias },
+          alias: { "openclaw/plugin-sdk": pathToFileURL(pluginSdkAlias).href },
         }
       : {}),
   });

@@ -3,6 +3,8 @@ import type { ModelCatalogEntry } from "./model-catalog.js";
 import { resolveAgentModelPrimary } from "./agent-scope.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import { normalizeGoogleModelId } from "./models-config.providers.js";
+import { FuzzyModelSelector } from "./evolution/fuzzy-model-selector.js";
+import { analyzeTaskComplexity } from "./fuzzy-selector.js";
 
 export type ModelRef = {
   provider: string;
@@ -197,7 +199,43 @@ export function resolveConfiguredModelRef(params: {
 export function resolveDefaultModelForAgent(params: {
   cfg: OpenClawConfig;
   agentId?: string;
+  sessionEntry?: {
+    usage?: { totalTokens?: number };
+    contextTokens?: number;
+    lastUrgency?: number;
+    lastComplexity?: number;
+  };
+  prompt?: string;
 }): ModelRef {
+  // Fuzzy model selection: when evolution is enabled and session data is available,
+  // use the Quake-inspired fuzzy selector to pick the optimal model tier.
+  const evolutionEnabled = params.cfg.tools?.evolution?.selfModification?.enabled ?? false;
+  if (evolutionEnabled && params.sessionEntry) {
+    try {
+      const { FuzzyModelSelector } = await import("./evolution/fuzzy-model-selector.js");
+      const { analyzeTaskComplexity } = await import("./fuzzy-selector.js");
+      const selector = new FuzzyModelSelector(params.cfg);
+
+      if (params.prompt) {
+        params.sessionEntry.lastComplexity = analyzeTaskComplexity(params.prompt);
+      }
+
+      const totalTokens = params.sessionEntry.usage?.totalTokens ?? 0;
+      const contextLimit = params.sessionEntry.contextTokens ?? 128000;
+      const remainingContextPct = Math.max(0, 1 - totalTokens / contextLimit);
+
+      const result = selector.selectModelSync({
+        taskComplexity: params.sessionEntry.lastComplexity ?? 0.5,
+        remainingContextPct,
+        userUrgency: params.sessionEntry.lastUrgency ?? 0.5,
+      });
+
+      return { provider: result.provider, model: result.modelId };
+    } catch {
+      // Fallback to normal resolution if fuzzy selector fails
+    }
+  }
+
   const agentModelOverride = params.agentId
     ? resolveAgentModelPrimary(params.cfg, params.agentId)
     : undefined;

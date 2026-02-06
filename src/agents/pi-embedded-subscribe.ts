@@ -9,6 +9,7 @@ import { createStreamingDirectiveAccumulator } from "../auto-reply/reply/streami
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { buildCodeSpanIndex, createInlineCodeState } from "../markdown/code-spans.js";
+import { formatToolStart } from "./personality/formatter.js";
 import { EmbeddedBlockChunker } from "./pi-embedded-block-chunker.js";
 import {
   isMessagingToolDuplicateNormalized,
@@ -37,6 +38,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     toolMetaById: new Map(),
     toolSummaryById: new Set(),
     lastToolError: undefined,
+    toolErrors: [],
     blockReplyBreak: params.blockReplyBreak ?? "text_end",
     reasoningMode,
     includeReasoning: reasoningMode === "on",
@@ -250,9 +252,17 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     if (!params.onToolResult) {
       return;
     }
-    const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
-      markdown: useMarkdown,
-    });
+    // Apply synonym formatting when personality dictionary is available
+    const synonymOpts = params.synonymDictionary
+      ? { synonymDictionary: params.synonymDictionary, useSynonyms: true }
+      : undefined;
+    const synonymPrefix =
+      synonymOpts && toolName ? formatToolStart(toolName, synonymOpts) : undefined;
+    const agg = synonymPrefix
+      ? synonymPrefix
+      : formatToolAggregate(toolName, meta ? [meta] : undefined, {
+          markdown: useMarkdown,
+        });
     const { text: cleanedText, mediaUrls } = parseReplyDirectives(agg);
     if (!cleanedText && (!mediaUrls || mediaUrls.length === 0)) {
       return;
@@ -498,6 +508,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     toolMetaById.clear();
     toolSummaryById.clear();
     state.lastToolError = undefined;
+    state.toolErrors.length = 0;
     messagingToolSentTexts.length = 0;
     messagingToolSentTextsNormalized.length = 0;
     messagingToolSentTargets.length = 0;
@@ -546,6 +557,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     // which is generated AFTER the tool sends the actual answer.
     didSendViaMessagingTool: () => messagingToolSentTexts.length > 0,
     getLastToolError: () => (state.lastToolError ? { ...state.lastToolError } : undefined),
+    getToolErrors: () => state.toolErrors.slice(),
     waitForCompactionRetry: () => {
       if (state.compactionInFlight || state.pendingCompactionRetry > 0) {
         ensureCompactionPromise();

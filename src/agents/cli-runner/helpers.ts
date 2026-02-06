@@ -196,7 +196,7 @@ function buildModelAliasLines(cfg?: OpenClawConfig) {
     .map((entry) => `- ${entry.alias}: ${entry.model}`);
 }
 
-export function buildSystemPrompt(params: {
+export async function buildSystemPrompt(params: {
   workspaceDir: string;
   config?: OpenClawConfig;
   defaultThinkLevel?: ThinkLevel;
@@ -208,10 +208,17 @@ export function buildSystemPrompt(params: {
   contextFiles?: EmbeddedContextFile[];
   modelDisplay: string;
   agentId?: string;
+  sessionEntry?: {
+    usage?: { totalTokens?: number };
+    contextTokens?: number;
+    lastUrgency?: number;
+    lastComplexity?: number;
+  };
 }) {
   const defaultModelRef = resolveDefaultModelForAgent({
     cfg: params.config ?? {},
     agentId: params.agentId,
+    sessionEntry: params.sessionEntry,
   });
   const defaultModelLabel = `${defaultModelRef.provider}/${defaultModelRef.model}`;
   const { runtimeInfo, userTimezone, userTime, userTimeFormat } = buildSystemPromptParams({
@@ -229,7 +236,7 @@ export function buildSystemPrompt(params: {
     },
   });
   const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
-  return buildAgentSystemPrompt({
+  const basePrompt = await buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
     defaultThinkLevel: params.defaultThinkLevel,
     extraSystemPrompt: params.extraSystemPrompt,
@@ -247,6 +254,15 @@ export function buildSystemPrompt(params: {
     ttsHint,
     memoryCitationsMode: params.config?.memory?.citations,
   });
+
+  // Apply evolution genotype modifications (non-blocking, falls back gracefully)
+  try {
+    const { applyCurrentGenotypeToPrompt } = await import("../evolution/integration.js");
+    return await applyCurrentGenotypeToPrompt(basePrompt);
+  } catch {
+    // Evolution module not available or failed to load - return base prompt
+    return basePrompt;
+  }
 }
 
 export function normalizeCliModel(modelId: string, backend: CliBackendConfig): string {

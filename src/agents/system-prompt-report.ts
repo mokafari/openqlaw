@@ -114,7 +114,7 @@ export function buildSystemPromptReport(params: {
   skillsPrompt: string;
   tools: AgentTool[];
 }): SessionSystemPromptReport {
-  const systemPrompt = params.systemPrompt.trim();
+  const systemPrompt = (typeof params.systemPrompt === "string" ? params.systemPrompt : "").trim();
   const projectContext = extractBetween(
     systemPrompt,
     "\n# Project Context\n",
