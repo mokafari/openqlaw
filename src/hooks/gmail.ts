@@ -6,6 +6,9 @@ import {
   resolveGatewayPort,
 } from "../config/config.js";
 
+// Re-export webhook URL utilities for use by agents
+export { buildWebhookUrl, buildWebhookCurlCommand, getGatewayPort } from "./webhook-url.js";
+
 export const DEFAULT_GMAIL_LABEL = "INBOX";
 export const DEFAULT_GMAIL_TOPIC = "gog-gmail-watch";
 export const DEFAULT_GMAIL_SUBSCRIPTION = "gog-gmail-watch-push";

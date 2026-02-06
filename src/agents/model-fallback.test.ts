@@ -15,7 +15,7 @@ function makeCfg(overrides: Partial<OpenClawConfig> = {}): OpenClawConfig {
       defaults: {
         model: {
           primary: "openai/gpt-4.1-mini",
-          fallbacks: ["anthropic/claude-haiku-3-5"],
+          fallbacks: ["anthropic/claude-haiku-4-5"],
         },
       },
     },
@@ -56,7 +56,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on 402 payment required", async () => {
@@ -76,7 +76,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on billing errors", async () => {
@@ -100,7 +100,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on credential validation errors", async () => {
@@ -120,7 +120,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("skips providers when all profiles are in cooldown", async () => {
@@ -262,14 +262,14 @@ describe("runWithModelFallback", () => {
         cfg,
         provider: "anthropic",
         model: "claude-opus-4-5",
-        fallbacksOverride: ["anthropic/claude-haiku-3-5"],
+        fallbacksOverride: ["anthropic/claude-haiku-4-5"],
         run,
       }),
     ).rejects.toThrow("All models failed");
 
     expect(run.mock.calls).toEqual([
       ["anthropic", "claude-opus-4-5"],
-      ["anthropic", "claude-haiku-3-5"],
+      ["anthropic", "claude-haiku-4-5"],
     ]);
   });
 
@@ -384,7 +384,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on lowercase credential errors", async () => {
@@ -404,7 +404,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on timeout abort errors", async () => {
@@ -427,7 +427,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on abort errors with timeout reasons", async () => {
@@ -449,7 +449,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back when message says aborted but error is a timeout", async () => {
@@ -469,7 +469,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("falls back on provider abort errors with request-aborted messages", async () => {
@@ -491,7 +491,7 @@ describe("runWithModelFallback", () => {
     expect(result.result).toBe("ok");
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toBe("anthropic");
-    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-3-5");
+    expect(run.mock.calls[1]?.[1]).toBe("claude-haiku-4-5");
   });
 
   it("does not fall back on user aborts", async () => {

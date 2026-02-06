@@ -46,7 +46,7 @@ export class FuzzyModelSelector {
 
     if (input.remainingContextPct < 0.1) {
       return {
-        modelId: "claude-haiku-3-5",
+        modelId: "claude-haiku-4-5",
         provider: "anthropic",
         rationale: "Context window critical (< 10%). Switching to high-efficiency model.",
       };
@@ -54,7 +54,7 @@ export class FuzzyModelSelector {
 
     if (input.userUrgency > 0.8) {
       return {
-        modelId: "claude-haiku-3-5",
+        modelId: "claude-haiku-4-5",
         provider: "anthropic",
         rationale: "High user urgency detected. Prioritizing low-latency response.",
       };
@@ -89,7 +89,7 @@ export class FuzzyModelSelector {
 
     if (input.remainingContextPct < 0.1) {
       return {
-        modelId: "claude-haiku-3-5",
+        modelId: "claude-haiku-4-5",
         provider: "anthropic",
         rationale: "Context window critical (< 10%). Switching to high-efficiency model.",
       };
@@ -97,7 +97,7 @@ export class FuzzyModelSelector {
 
     if (input.userUrgency > 0.8) {
       return {
-        modelId: "claude-haiku-3-5",
+        modelId: "claude-haiku-4-5",
         provider: "anthropic",
         rationale: "High user urgency detected. Prioritizing low-latency response.",
       };

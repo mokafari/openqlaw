@@ -135,7 +135,7 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
   if (taskComplexity < 0.2 || weight < 0.1) {
     return {
       provider: defaultProvider,
-      model: "claude-haiku-3-5", // Machine Gun - fast and cheap
+      model: "claude-haiku-4-5", // Machine Gun - fast and cheap
     };
   }
 
@@ -143,7 +143,7 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
   if (taskComplexity < 0.5 && userUrgency > 0.7) {
     return {
       provider: defaultProvider,
-      model: "claude-haiku-3-5", // Fast response for urgent simple tasks
+      model: "claude-haiku-4-5", // Fast response for urgent simple tasks
     };
   }
 

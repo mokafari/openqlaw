@@ -22,7 +22,8 @@ const CLAUDE_MODEL_ALIASES: Record<string, string> = {
   "claude-sonnet-4-0": "sonnet",
   haiku: "haiku",
   "haiku-3.5": "haiku",
-  "claude-haiku-3-5": "haiku",
+  "claude-haiku-4-5": "haiku",
+  "claude-haiku-3-5": "haiku", // Legacy alias for backwards compatibility
 };
 
 const DEFAULT_CLAUDE_BACKEND: CliBackendConfig = {

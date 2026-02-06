@@ -4,6 +4,11 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { clearSessionAuthProfileOverride } from "../../agents/auth-profiles/session-override.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
+import {
+  analyzeTaskComplexity,
+  calculateContextBudget,
+  selectModelFuzzy,
+} from "../../agents/fuzzy-selector.js";
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import {
   buildAllowedModelSet,
@@ -297,6 +302,27 @@ export async function createModelSelectionState(params: {
 
   let provider = params.hasModelDirective ? params.provider : initialModel.provider;
   let model = params.hasModelDirective ? params.model : initialModel.model;
+
+  // Fuzzy Model Selector: when no directive is present, use Quake-inspired logic
+  // to dynamically select model based on complexity and context budget.
+  if (!params.hasModelDirective && params.prompt) {
+    const taskComplexity = analyzeTaskComplexity(params.prompt);
+    const contextLimit = sessionEntry?.contextTokens ?? 128000;
+    const usedTokens = sessionEntry?.totalTokens ?? 0;
+    const contextBudget = calculateContextBudget(contextLimit, usedTokens);
+    const userUrgency = sessionEntry?.lastUrgency ?? 0.5;
+
+    const fuzzySelection = selectModelFuzzy({
+      taskComplexity,
+      contextBudget,
+      userUrgency,
+      defaultProvider,
+      defaultModel,
+    });
+
+    provider = fuzzySelection.provider;
+    model = fuzzySelection.model;
+  }
 
   const hasAllowlist = agentCfg?.models && Object.keys(agentCfg.models).length > 0;
   const initialStoredOverride = resolveStoredModelOverride({

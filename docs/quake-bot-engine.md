@@ -767,19 +767,19 @@ The integration was executed in **9 phases** plus the evolution system:
 
 ## Known Limitations and Future Work
 
-### Not Yet Wired Into Hot Path
+### Wiring Status
 
-These components are built and available but not yet called in the critical agent loop:
+Status of components in the critical agent loop:
 
-1. **Reachability Validation Hook** - `validateReachability()` exists but is not called before tool execution. Adding this to `pi-embedded-runner/run/attempt.ts` would prevent "impossible jumps" (unauthorized actions).
+1. **Reachability Validation Hook** - ✅ **WIRED IN**: `checkReachability()` is called in `pi-tools.before-tool-call.ts` before tool execution (line 118), and `validateReachability()` is now used to validate context area transitions for tools with `reachabilityEdges` (e.g., filesystem -> browser). Both capability checks and transition validation are active.
 
-2. **Fuzzy Model Selector in Pipeline** - `selectModelFuzzy()` is available but not yet wired into `createModelSelectionState()`. Currently model selection uses explicit user directives.
+2. **Fuzzy Model Selector in Pipeline** - ❌ **NOT WIRED**: `selectModelFuzzy()` exists but is not called in `createModelSelectionState()`. Model selection still uses explicit user directives and allowlists.
 
-3. **Synonym Formatters in Tool Output** - `formatToolStart()`/`formatToolSuccess()` exist but are not yet integrated into tool execution handlers. Would replace dry language with natural variation.
+3. **Synonym Formatters in Tool Output** - ✅ **WIRED IN**: `formatToolStart()` is used in `pi-embedded-subscribe.ts` (line 260) for tool start messages, and `formatToolSuccess()` is now integrated into `handleToolExecutionEnd()` in `pi-embedded-subscribe.handlers.tools.ts` for successful tool completions.
 
-4. **ContextGraph Pre-Flight Checks** - `ContextGraph.check()` is available but not called before state transitions in the agent loop. Would prevent attempting impossible operations.
+4. **ContextGraph Pre-Flight Checks** - ✅ **WIRED IN**: `ContextGraph.check()` is called in `fsm/state-manager.ts` before state transitions (line 121), preventing transitions to states requiring unavailable capabilities.
 
-5. **Camping Wake Events** - Camping manager is ready but cron/webhook listeners for automatic wake-up are not implemented. Currently requires manual intervention.
+5. **Camping Wake Events** - ✅ **WIRED IN**: Camping jobs can be created via the `cron` tool's "camp" action, webhook handlers exist in `gateway/server/hooks.ts`, and the cron service automatically wakes camping sessions when jobs complete (see `cron/service/timer.ts` line 140).
 
 ### Potential Enhancements
 

@@ -4,7 +4,7 @@ import { maybeSnapshotDevContinuation } from "../infra/dev-self-edit-hook.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { CONTEXT_AREAS } from "./aas/context-areas.js";
-import { checkReachability } from "./aas/reachability.js";
+import { checkReachability, validateReachability } from "./aas/reachability.js";
 import { getToolMetadata } from "./aas/tool-surface.js";
 import { normalizeToolName } from "./tool-policy.js";
 
@@ -106,6 +106,31 @@ async function checkToolReachability(
     if (area?.requiredReachability) {
       for (const type of area.requiredReachability) {
         requiredTypes.add(type);
+      }
+    }
+  }
+
+  // Validate context area transitions if tool has reachability edges
+  if (metadata.reachabilityEdges && metadata.reachabilityEdges.length > 0) {
+    for (const edge of metadata.reachabilityEdges) {
+      // Parse edge format: "from->to"
+      const match = edge.match(/^(.+?)\s*->\s*(.+)$/);
+      if (match) {
+        const [, fromArea, toArea] = match;
+        try {
+          const validation = await validateReachability(fromArea, toArea, reachCtx);
+          if (!validation.valid) {
+            // Warn but don't block — reachability enforcement is advisory for now
+            log.warn(
+              `Tool "${toolName}" transition ${fromArea} -> ${toArea} invalid: ${validation.reason ?? "missing capabilities"}`,
+            );
+          }
+        } catch (err) {
+          log.warn(
+            `reachability validation failed for tool=${toolName} edge=${edge}: ${String(err)}`,
+          );
+          // Don't block on validation failure — fail open
+        }
       }
     }
   }

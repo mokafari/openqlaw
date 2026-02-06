@@ -209,14 +209,21 @@ export async function buildStatusReply(params: {
     ? (normalizeGroupActivation(sessionEntry?.groupActivation) ?? defaultGroupActivation())
     : undefined;
   const agentDefaults = cfg.agents?.defaults ?? {};
+  const agentModelConfig = agentDefaults.model;
+  // When model is a string, use it directly; otherwise use the resolved provider/model
+  const modelPrimary =
+    typeof agentModelConfig === "string" ? agentModelConfig : `${provider}/${model}`;
   const statusText = buildStatusMessage({
     config: cfg,
     agent: {
       ...agentDefaults,
-      model: {
-        ...agentDefaults.model,
-        primary: `${provider}/${model}`,
-      },
+      model:
+        typeof agentModelConfig === "string"
+          ? { primary: modelPrimary }
+          : {
+              ...agentModelConfig,
+              primary: modelPrimary,
+            },
       contextTokens,
       thinkingDefault: agentDefaults.thinkingDefault,
       verboseDefault: agentDefaults.verboseDefault,

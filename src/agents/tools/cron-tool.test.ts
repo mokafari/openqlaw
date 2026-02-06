@@ -233,4 +233,197 @@ describe("cron tool", () => {
     expect(call.method).toBe("cron.add");
     expect(call.params?.agentId).toBeNull();
   });
+
+  describe("camp action", () => {
+    it("creates camping job with webhook condition", async () => {
+      callGatewayMock.mockResolvedValueOnce({ ok: true, data: { id: "job-camp-123" } });
+
+      const tool = createCronTool({ agentSessionKey: "main" });
+      await tool.execute("call-camp", {
+        action: "camp",
+        wakeMessage: "PR was merged",
+        condition: {
+          kind: "webhook",
+          endpoint: "/hooks/github/pr-merged",
+          filter: { repo: "owner/repo" },
+        },
+        timeoutMinutes: 60,
+      });
+
+      expect(callGatewayMock).toHaveBeenCalledTimes(1);
+      const call = callGatewayMock.mock.calls[0]?.[0] as {
+        method?: string;
+        params?: {
+          name?: string;
+          description?: string;
+          schedule?: { kind: string; at: string };
+          sessionTarget?: string;
+          wakeMode?: string;
+          payload?: { kind: string; message?: string };
+          delivery?: { mode?: string };
+          enabled?: boolean;
+          agentId?: string;
+          metadata?: { condition?: unknown; camping?: boolean };
+        };
+      };
+
+      expect(call.method).toBe("cron.add");
+      expect(call.params?.name).toContain("Camp: PR was merged");
+      expect(call.params?.description).toContain("Camping job waiting for condition");
+      expect(call.params?.schedule?.kind).toBe("at");
+      expect(call.params?.sessionTarget).toBe("isolated");
+      expect(call.params?.wakeMode).toBe("now");
+      expect(call.params?.payload?.kind).toBe("agentTurn");
+      expect(call.params?.payload?.message).toBe("PR was merged");
+      expect(call.params?.delivery?.mode).toBe("announce");
+      expect(call.params?.enabled).toBe(true);
+      expect(call.params?.agentId).toBe("agent-123");
+      expect(call.params?.metadata?.camping).toBe(true);
+      expect(call.params?.metadata?.condition).toEqual({
+        kind: "webhook",
+        endpoint: "/hooks/github/pr-merged",
+        filter: { repo: "owner/repo" },
+      });
+    });
+
+    it("uses default timeout of 60 minutes when not specified", async () => {
+      callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+      const tool = createCronTool();
+      await tool.execute("call-camp-default", {
+        action: "camp",
+        wakeMessage: "Build completed",
+        condition: {
+          kind: "webhook",
+          endpoint: "/hooks/build",
+        },
+      });
+
+      const call = callGatewayMock.mock.calls[0]?.[0] as {
+        params?: { schedule?: { at: string } };
+      };
+
+      const scheduledAt = new Date(call.params?.schedule?.at ?? "");
+      const now = new Date();
+      const timeoutMs = scheduledAt.getTime() - now.getTime();
+
+      // Should be approximately 60 minutes (allow 1 second tolerance)
+      expect(timeoutMs).toBeGreaterThan(59 * 60 * 1000);
+      expect(timeoutMs).toBeLessThan(61 * 60 * 1000);
+    });
+
+    it("uses custom timeout when specified", async () => {
+      callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+      const tool = createCronTool();
+      await tool.execute("call-camp-custom", {
+        action: "camp",
+        wakeMessage: "Deployment finished",
+        condition: {
+          kind: "webhook",
+          endpoint: "/hooks/deploy",
+        },
+        timeoutMinutes: 30,
+      });
+
+      const call = callGatewayMock.mock.calls[0]?.[0] as {
+        params?: { schedule?: { at: string } };
+      };
+
+      const scheduledAt = new Date(call.params?.schedule?.at ?? "");
+      const now = new Date();
+      const timeoutMs = scheduledAt.getTime() - now.getTime();
+
+      // Should be approximately 30 minutes
+      expect(timeoutMs).toBeGreaterThan(29 * 60 * 1000);
+      expect(timeoutMs).toBeLessThan(31 * 60 * 1000);
+    });
+
+    it("truncates wake message in job name to 50 characters", async () => {
+      callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+      const tool = createCronTool();
+      const longMessage = "A".repeat(100);
+      await tool.execute("call-camp-long", {
+        action: "camp",
+        wakeMessage: longMessage,
+        condition: {
+          kind: "webhook",
+          endpoint: "/hooks/test",
+        },
+      });
+
+      const call = callGatewayMock.mock.calls[0]?.[0] as {
+        params?: { name?: string };
+      };
+
+      expect(call.params?.name).toBe(`Camp: ${"A".repeat(50)}`);
+      expect(call.params?.name?.length).toBeLessThanOrEqual(56); // "Camp: " + 50 chars
+    });
+
+    it("requires condition parameter", async () => {
+      const tool = createCronTool();
+
+      await expect(
+        tool.execute("call-camp-no-condition", {
+          action: "camp",
+          wakeMessage: "Test",
+        }),
+      ).rejects.toThrow("condition required for camp action");
+    });
+
+    it("requires wakeMessage parameter", async () => {
+      const tool = createCronTool();
+
+      await expect(
+        tool.execute("call-camp-no-message", {
+          action: "camp",
+          condition: {
+            kind: "webhook",
+            endpoint: "/hooks/test",
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("sets agentId from session key when provided", async () => {
+      callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+      const tool = createCronTool({ agentSessionKey: "main" });
+      await tool.execute("call-camp-session", {
+        action: "camp",
+        wakeMessage: "Wake up",
+        condition: {
+          kind: "webhook",
+          endpoint: "/hooks/test",
+        },
+      });
+
+      const call = callGatewayMock.mock.calls[0]?.[0] as {
+        params?: { agentId?: string };
+      };
+
+      expect(call.params?.agentId).toBe("agent-123");
+    });
+
+    it("does not set agentId when session key not provided", async () => {
+      callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+      const tool = createCronTool();
+      await tool.execute("call-camp-no-session", {
+        action: "camp",
+        wakeMessage: "Wake up",
+        condition: {
+          kind: "webhook",
+          endpoint: "/hooks/test",
+        },
+      });
+
+      const call = callGatewayMock.mock.calls[0]?.[0] as {
+        params?: { agentId?: string };
+      };
+
+      expect(call.params?.agentId).toBeUndefined();
+    });
+  });
 });

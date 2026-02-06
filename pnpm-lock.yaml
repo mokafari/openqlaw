@@ -383,6 +383,16 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/memory-cognee:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: 0.34.47
+        version: 0.34.47
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/memory-core:
     devDependencies:
       openclaw:

@@ -1,0 +1,44 @@
+{
+  // Webhook configuration for phase completion and general task notifications
+  hooks: {
+    enabled: true,
+    token: "your-secret-token-here", // Generate with: openssl rand -hex 24
+    path: "/hooks",
+
+    mappings: [
+      {
+        // Option 1: Source-based routing (recommended for general use)
+        // Matches any path if payload includes source: "phase-completion"
+        id: "phase-completion",
+        match: { source: "phase-completion" },
+        action: "wake",
+        wakeMode: "now",
+        name: "Phase Complete",
+        textTemplate: "Phase completion: {{payload.phase || payload.message || 'Task done'}}",
+      },
+
+      {
+        // Option 2: Exact path matching for specific endpoints
+        // Use this if you want to match exact paths like /hooks/djs3/phase7-done
+        id: "djs3-phase7",
+        match: { path: "djs3/phase7-done" },
+        action: "wake",
+        wakeMode: "now",
+        name: "Phase 7 Complete",
+        textTemplate: "Phase 7 complete: {{payload.message || 'Task done'}}",
+      },
+
+      {
+        // Example: Match any path starting with "djs3/phase" and ending with "-done"
+        // Note: Path matching is exact, so you need one mapping per path pattern
+        // For dynamic paths, use source-based routing (Option 1) instead
+        id: "djs3-phase1",
+        match: { path: "djs3/phase1-done" },
+        action: "wake",
+        wakeMode: "now",
+        name: "Phase 1 Complete",
+        textTemplate: "Phase 1 complete: {{payload.message || 'Task done'}}",
+      },
+    ],
+  },
+}
