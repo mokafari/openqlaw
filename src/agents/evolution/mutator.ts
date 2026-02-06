@@ -77,6 +77,75 @@ export class Mutator {
   }
 
   /**
+   * Identify system failures (build failures, gateway crashes, etc.).
+   */
+  async identifySystemFailures(): Promise<
+    Array<{
+      type: "build-failure" | "gateway-crash" | "runtime-error";
+      error: string;
+      timestamp: number;
+      logs?: string;
+    }>
+  > {
+    const failures: Array<{
+      type: "build-failure" | "gateway-crash" | "runtime-error";
+      error: string;
+      timestamp: number;
+      logs?: string;
+    }> = [];
+
+    // Check for recent build failures in recovery state
+    try {
+      const { resolveStateDir } = await import("../../config/paths.js");
+      const { readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+
+      const recoveryStatePath = join(resolveStateDir(), "evolution", "recovery-state.json");
+      try {
+        const stateContent = await readFile(recoveryStatePath, "utf-8");
+        const state = JSON.parse(stateContent) as {
+          currentRecovery?: { error?: { code?: string }; startedAt?: number };
+          history?: Array<{ error?: string; timestamp?: number; success?: boolean }>;
+        };
+
+        // Check current recovery
+        if (state.currentRecovery && state.currentRecovery.startedAt) {
+          const age = Date.now() - (state.currentRecovery.startedAt ?? 0);
+          // If recovery started in last hour and is still active
+          if (age < 3600000) {
+            failures.push({
+              type: "build-failure",
+              error: state.currentRecovery.error?.code ?? "unknown",
+              timestamp: state.currentRecovery.startedAt,
+            });
+          }
+        }
+
+        // Check recent failures in history
+        if (state.history) {
+          const recentFailures = state.history
+            .filter((h) => !h.success && h.timestamp && Date.now() - h.timestamp < 3600000)
+            .slice(0, 5); // Last 5 failures
+
+          for (const failure of recentFailures) {
+            failures.push({
+              type: "build-failure",
+              error: failure.error ?? "unknown",
+              timestamp: failure.timestamp ?? Date.now(),
+            });
+          }
+        }
+      } catch {
+        // Recovery state file doesn't exist or is invalid, that's fine
+      }
+    } catch {
+      // Can't read recovery state, continue
+    }
+
+    return failures;
+  }
+
+  /**
    * Spawn a diagnostic agent to analyze a tool failure.
    */
   async spawnDiagnosticAgent(hotspot: ToolHotspot): Promise<DiagnosticResult> {

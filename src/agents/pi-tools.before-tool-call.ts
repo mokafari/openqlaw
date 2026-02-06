@@ -6,17 +6,29 @@ import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { CONTEXT_AREAS } from "./aas/context-areas.js";
 import { checkReachability, validateReachability } from "./aas/reachability.js";
 import { getToolMetadata } from "./aas/tool-surface.js";
+import { formatToolStart } from "./personality/formatter.js";
 import { normalizeToolName } from "./tool-policy.js";
 
 type HookContext = {
   agentId?: string;
   sessionKey?: string;
   workspaceDir?: string;
+  reachabilityEnforcement?: "warn" | "block";
+  synonymDictionary?: import("./personality/synonyms.js").SynonymDictionary;
 };
 
 type HookOutcome = { blocked: true; reason: string } | { blocked: false; params: unknown };
 
 const log = createSubsystemLogger("agents/tools");
+
+// Module-level synonym dictionary, set lazily after Quake integration init.
+let globalSynonymDictionary: import("./personality/synonyms.js").SynonymDictionary | undefined;
+
+export function setGlobalSynonymDictionary(
+  dict: import("./personality/synonyms.js").SynonymDictionary | undefined,
+): void {
+  globalSynonymDictionary = dict;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -120,10 +132,11 @@ async function checkToolReachability(
         try {
           const validation = await validateReachability(fromArea, toArea, reachCtx);
           if (!validation.valid) {
-            // Warn but don't block — reachability enforcement is advisory for now
-            log.warn(
-              `Tool "${toolName}" transition ${fromArea} -> ${toArea} invalid: ${validation.reason ?? "missing capabilities"}`,
-            );
+            const reason = `Tool "${toolName}" transition ${fromArea} -> ${toArea} invalid: ${validation.reason ?? "missing capabilities"}`;
+            if (ctx?.reachabilityEnforcement === "block") {
+              return { blocked: true, reason };
+            }
+            log.warn(reason);
           }
         } catch (err) {
           log.warn(
@@ -142,10 +155,11 @@ async function checkToolReachability(
   try {
     const result = await checkReachability([...requiredTypes], reachCtx);
     if (!result.available) {
-      // Warn but don't block — reachability enforcement is advisory for now
-      log.warn(
-        `Tool "${toolName}" requires capabilities not available: ${result.missing.join(", ")}`,
-      );
+      const reason = `Tool "${toolName}" requires capabilities not available: ${result.missing.join(", ")}`;
+      if (ctx?.reachabilityEnforcement === "block") {
+        return { blocked: true, reason };
+      }
+      log.warn(reason);
     }
   } catch (err) {
     log.warn(`reachability check failed for tool=${toolName}: ${String(err)}`);
@@ -180,6 +194,16 @@ export function wrapToolWithBeforeToolCallHook(
       const reachResult = await checkToolReachability(toolName, outcome.params, ctx);
       if (reachResult.blocked) {
         throw new Error(reachResult.reason ?? "Tool blocked by reachability check");
+      }
+      // Emit personality-flavored tool start log via synonym dictionary
+      const dict = ctx?.synonymDictionary ?? globalSynonymDictionary;
+      if (dict) {
+        try {
+          const msg = formatToolStart(toolName, { synonymDictionary: dict });
+          log.debug(`[personality] ${msg}`);
+        } catch {
+          // Non-fatal: synonym formatting is advisory
+        }
       }
       // Snapshot continuation before self-edits so the dev server can recover context
       if (isPlainObject(outcome.params)) {

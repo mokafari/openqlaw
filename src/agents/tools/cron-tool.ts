@@ -374,8 +374,24 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             enabled: true,
             agentId,
             // Store condition metadata (webhook system will handle actual triggering)
-            metadata: { condition, camping: true },
+            metadata: { condition, camping: true, sessionKey: opts?.agentSessionKey },
           };
+
+          // Enter camping state so the manager knows this session is waiting
+          try {
+            const { globalCampingManager } = await import("../../agents/camping.js");
+            if (opts?.agentSessionKey) {
+              globalCampingManager.enterCamping({
+                sessionId: opts.agentSessionKey,
+                waitingFor: "cron",
+                triggerId: campJob.name,
+                resumeCondition: wakeMessage,
+                timeoutSeconds: timeoutMinutes * 60,
+              });
+            }
+          } catch {
+            // Non-fatal: camping state tracking is advisory
+          }
 
           return jsonResult(await callGatewayTool("cron.add", gatewayOpts, campJob));
         }

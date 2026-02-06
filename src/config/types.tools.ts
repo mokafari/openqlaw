@@ -449,6 +449,10 @@ export type ToolsConfig = {
       deny?: string[];
     };
   };
+  /** Reachability enforcement mode: "warn" logs, "block" prevents execution (default: "warn"). */
+  reachabilityEnforcement?: "warn" | "block";
+  /** Enable fuzzy model selection independently of evolution (default: false). */
+  fuzzyModelSelection?: boolean;
   /** Evolution and self-modification configuration. */
   evolution?: {
     /** Self-modification capabilities for autonomous code improvement. */
@@ -461,6 +465,39 @@ export type ToolsConfig = {
       maxConcurrentMutations?: number;
       /** Auto-trigger mutation cycle when tool error rate exceeds threshold (default: false). */
       autoTrigger?: boolean;
+    };
+    /** Automatic build failure recovery configuration. */
+    autoRecovery?: {
+      /** Enable automatic build failure recovery (default: true). */
+      enabled?: boolean;
+      /** Maximum number of recovery attempts per error (default: 3). */
+      maxRetries?: number;
+      /** Coding agent to use for fixes: "claude-code", "codex", "opencode", or "pi" (default: "claude-code"). */
+      agent?: "claude-code" | "codex" | "opencode" | "pi";
+      /** Timeout for agent execution in milliseconds (default: 300000 = 5 minutes). */
+      timeout?: number;
+      /** Alert user on recovery failure (default: true). */
+      alertOnFailure?: boolean;
+      /** Channels to send alerts to (default: []). */
+      alertChannels?: string[];
+    };
+    /** Health monitor configuration for gateway health checks. */
+    healthMonitor?: {
+      /** Enable hourly health checks (default: true). */
+      enabled?: boolean;
+      /** Health check interval in milliseconds (default: 3600000 = 1 hour). */
+      intervalMs?: number;
+      /** Spawn agent if gateway is unhealthy (default: true). */
+      spawnAgentOnFailure?: boolean;
+      /** Health check timeout in milliseconds (default: 10000). */
+      healthCheckTimeout?: number;
+    };
+    /** Watch script configuration. */
+    watch?: {
+      /** Auto-restart gateway on file changes (default: false). */
+      autoRestart?: boolean;
+      /** Log file changes (default: true). */
+      logChanges?: boolean;
     };
   };
 };

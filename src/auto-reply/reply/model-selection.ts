@@ -303,9 +303,11 @@ export async function createModelSelectionState(params: {
   let provider = params.hasModelDirective ? params.provider : initialModel.provider;
   let model = params.hasModelDirective ? params.model : initialModel.model;
 
-  // Fuzzy Model Selector: when no directive is present, use Quake-inspired logic
-  // to dynamically select model based on complexity and context budget.
-  if (!params.hasModelDirective && params.prompt) {
+  // Fuzzy Model Selector: when enabled and no directive is present, use Quake-inspired
+  // logic to dynamically select model based on complexity and context budget.
+  const fuzzyEnabled =
+    cfg.tools?.fuzzyModelSelection ?? cfg.tools?.evolution?.selfModification?.enabled ?? false;
+  if (fuzzyEnabled && !params.hasModelDirective && params.prompt) {
     const taskComplexity = analyzeTaskComplexity(params.prompt);
     const contextLimit = sessionEntry?.contextTokens ?? 128000;
     const usedTokens = sessionEntry?.totalTokens ?? 0;

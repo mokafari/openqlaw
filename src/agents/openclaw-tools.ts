@@ -7,11 +7,17 @@ import { createAgentsListTool } from "./tools/agents-list-tool.js";
 import { createBrowserTool } from "./tools/browser-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
 import { createCronTool } from "./tools/cron-tool.js";
+import { getGlobalDynamicRegistry } from "./tools/dynamic-registry.js";
+import {
+  createDynamicToolCreatorTool,
+  createDynamicToolRemoverTool,
+} from "./tools/dynamic-tool-creator.js";
 import {
   createEvolutionProposePatchTool,
   createEvolutionRunDojoTestTool,
   createEvolutionListPatchesTool,
 } from "./tools/evolution-tools.js";
+import { createGatewayRebuildTool } from "./tools/gateway-rebuild-tool.js";
 import { createGatewayTool } from "./tools/gateway-tool.js";
 import {
   createGoalPushTool,
@@ -122,6 +128,9 @@ export function createOpenClawTools(options?: {
       agentSessionKey: options?.agentSessionKey,
       config: options?.config,
     }),
+    createGatewayRebuildTool({
+      workspaceDir: options?.workspaceDir,
+    }),
     createAgentsListTool({
       agentSessionKey: options?.agentSessionKey,
       requesterAgentIdOverride: options?.requesterAgentIdOverride,
@@ -192,6 +201,20 @@ export function createOpenClawTools(options?: {
         sessionKey: options?.agentSessionKey,
       }),
     );
+  }
+
+  // Dynamic tool creation/removal (gated behind evolution or fuzzyModelSelection)
+  const dynamicEnabled = evolutionEnabled || (options?.config?.tools?.fuzzyModelSelection ?? false);
+  if (dynamicEnabled) {
+    tools.push(createDynamicToolCreatorTool(), createDynamicToolRemoverTool());
+  }
+
+  // Include any already-registered dynamic tools
+  const existingNames = new Set(tools.map((t) => t.name));
+  for (const dt of getGlobalDynamicRegistry().getTools()) {
+    if (!existingNames.has(dt.name)) {
+      tools.push(dt);
+    }
   }
 
   const pluginTools = resolvePluginTools({

@@ -440,6 +440,8 @@ export function createOpenClawCodingTools(options?: {
     wrapToolWithBeforeToolCallHook(tool, {
       agentId,
       sessionKey: options?.sessionKey,
+      workspaceDir: options?.workspaceDir,
+      reachabilityEnforcement: options?.config?.tools?.reachabilityEnforcement,
     }),
   );
   const withAbort = options?.abortSignal

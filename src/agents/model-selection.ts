@@ -207,10 +207,11 @@ export function resolveDefaultModelForAgent(params: {
   };
   prompt?: string;
 }): ModelRef {
-  // Fuzzy model selection: when evolution is enabled and session data is available,
-  // use the Quake-inspired fuzzy selector to pick the optimal model tier.
+  // Fuzzy model selection: when evolution or fuzzyModelSelection is enabled
+  // and session data is available, use the Quake-inspired fuzzy selector.
   const evolutionEnabled = params.cfg.tools?.evolution?.selfModification?.enabled ?? false;
-  if (evolutionEnabled && params.sessionEntry) {
+  const fuzzyEnabled = params.cfg.tools?.fuzzyModelSelection ?? false;
+  if ((evolutionEnabled || fuzzyEnabled) && params.sessionEntry) {
     try {
       const selector = new FuzzyModelSelector(params.cfg);
 

@@ -18,7 +18,18 @@ export class MutationWorkflow {
   async run() {
     log.info("[mutation] Starting self-modification cycle...");
 
-    // 1. Identify hotspots (reflexive)
+    // 1. Identify system failures (build failures, gateway crashes)
+    const systemFailures = await this.mutator.identifySystemFailures();
+    if (systemFailures.length > 0) {
+      log.info(
+        `[mutation] Found ${systemFailures.length} system failure(s), attempting recovery...`,
+      );
+      for (const failure of systemFailures) {
+        await this.attemptSystemRecovery(failure);
+      }
+    }
+
+    // 2. Identify hotspots (reflexive)
     const hotspots = await this.mutator.identifyHotspots({ threshold: 0.15 }); // Be eager
     if (hotspots.length === 0) {
       log.info("[mutation] No tool hotspots identified.");
@@ -72,6 +83,40 @@ export class MutationWorkflow {
           `[mutation] FAILURE: Dojo failed to verify fix for ${hotspot.toolName}: ${stats.error}`,
         );
       }
+    }
+  }
+
+  /**
+   * Attempt recovery for system failures.
+   */
+  private async attemptSystemRecovery(failure: {
+    type: "build-failure" | "gateway-crash" | "runtime-error";
+    error: string;
+    timestamp: number;
+    logs?: string;
+  }): Promise<void> {
+    try {
+      const { GatewayRecovery } = await import("./gateway-recovery.js");
+      const recovery = new GatewayRecovery({
+        workspaceDir: this.mutator["workspaceDir"] ?? process.cwd(),
+        maxRetries: 3,
+        agentStrategy: "claude-code",
+      });
+
+      if (failure.type === "build-failure") {
+        await recovery.handleBuildFailure({
+          buildLog: failure.logs ?? `Build failure: ${failure.error}`,
+          workspaceDir: this.mutator["workspaceDir"] ?? process.cwd(),
+        });
+      } else {
+        log.warn(
+          `[mutation] System failure type ${failure.type} not yet handled by recovery system`,
+        );
+      }
+    } catch (err) {
+      log.error(
+        `[mutation] Failed to recover from system failure: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 }

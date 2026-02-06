@@ -4,6 +4,7 @@ import { streamSimple } from "@mariozechner/pi-ai";
 import { createAgentSession, SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
 import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
@@ -371,6 +372,28 @@ export async function runEmbeddedAttempt(
     } catch (err) {
       // Non-fatal: Quake integration is optional
       log.debug(`Quake integration init failed (non-fatal): ${err}`);
+    }
+
+    // Wire synonym dictionary for personality-aware tool output
+    if (quakeContext?.synonymDictionary) {
+      try {
+        const { setGlobalSynonymDictionary } = await import("../../pi-tools.before-tool-call.js");
+        setGlobalSynonymDictionary(quakeContext.synonymDictionary);
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    // Initialize dynamic tool registry (load persisted tools from prior sessions)
+    try {
+      const { initGlobalDynamicRegistry } = await import("../../tools/dynamic-registry.js");
+      const dtAgentDir = params.agentDir ?? resolveOpenClawAgentDir();
+      const dynamicToolsDir = path.join(dtAgentDir, "dynamic-tools");
+      const dynamicRegistry = initGlobalDynamicRegistry(dynamicToolsDir);
+      await dynamicRegistry.loadPersistedTools();
+    } catch (err) {
+      // Non-fatal: dynamic tool registry is optional
+      log.debug(`Dynamic tool registry init failed (non-fatal): ${err}`);
     }
 
     const appendPrompt = await buildEmbeddedSystemPrompt({

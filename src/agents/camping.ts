@@ -24,6 +24,7 @@ export type CampingState = {
  */
 export class CampingManager {
   private activeCamping = new Map<string, CampingState>();
+  private wakeCallbacks = new Map<string, Array<(state: CampingState) => void>>();
 
   /**
    * Enter camping state
@@ -51,14 +52,40 @@ export class CampingManager {
   }
 
   /**
-   * Exit camping state
+   * Exit camping state and fire any registered wake callbacks
    */
   exitCamping(sessionId: string): CampingState | undefined {
     const camping = this.activeCamping.get(sessionId);
     if (camping) {
       this.activeCamping.delete(sessionId);
+      const callbacks = this.wakeCallbacks.get(sessionId) ?? [];
+      for (const cb of callbacks) {
+        try {
+          cb(camping);
+        } catch {
+          // Ignore callback errors
+        }
+      }
+      this.wakeCallbacks.delete(sessionId);
     }
     return camping;
+  }
+
+  /**
+   * Register a callback to be invoked when a session exits camping.
+   * Returns an unsubscribe function.
+   */
+  onWake(sessionId: string, callback: (state: CampingState) => void): () => void {
+    const callbacks = this.wakeCallbacks.get(sessionId) ?? [];
+    callbacks.push(callback);
+    this.wakeCallbacks.set(sessionId, callbacks);
+    return () => {
+      const cbs = this.wakeCallbacks.get(sessionId) ?? [];
+      this.wakeCallbacks.set(
+        sessionId,
+        cbs.filter((cb) => cb !== callback),
+      );
+    };
   }
 
   /**
@@ -101,10 +128,11 @@ export class CampingManager {
   }
 
   /**
-   * Clear all camping states (for testing/cleanup)
+   * Clear all camping states and wake callbacks (for testing/cleanup)
    */
   clear(): void {
     this.activeCamping.clear();
+    this.wakeCallbacks.clear();
   }
 
   /**

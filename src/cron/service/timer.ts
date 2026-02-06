@@ -140,7 +140,8 @@ export async function executeJob(
     if (job.metadata?.camping && status === "ok") {
       try {
         const { globalCampingManager } = await import("../../agents/camping.js");
-        const campingSessionId = job.agentId ?? job.id;
+        // Prefer explicit sessionKey from metadata, fall back to agentId, then job id
+        const campingSessionId = job.metadata.sessionKey ?? job.agentId ?? job.id;
         const exited = globalCampingManager.exitCamping(campingSessionId);
         if (exited) {
           state.deps.log.info(

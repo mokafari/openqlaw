@@ -543,6 +543,8 @@ export const ToolsSchema = z
       })
       .strict()
       .optional(),
+    reachabilityEnforcement: z.enum(["warn", "block"]).optional(),
+    fuzzyModelSelection: z.boolean().optional(),
     evolution: z
       .object({
         selfModification: z
@@ -551,6 +553,40 @@ export const ToolsSchema = z
             policyPath: z.string().optional(),
             maxConcurrentMutations: z.number().int().positive().optional(),
             autoTrigger: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+        autoRecovery: z
+          .object({
+            enabled: z.boolean().optional(),
+            maxRetries: z.number().int().positive().optional(),
+            agent: z
+              .union([
+                z.literal("claude-code"),
+                z.literal("codex"),
+                z.literal("opencode"),
+                z.literal("pi"),
+              ])
+              .optional(),
+            timeout: z.number().int().positive().optional(),
+            alertOnFailure: z.boolean().optional(),
+            alertChannels: z.array(z.string()).optional(),
+          })
+          .strict()
+          .optional(),
+        healthMonitor: z
+          .object({
+            enabled: z.boolean().optional(),
+            intervalMs: z.number().int().positive().optional(),
+            spawnAgentOnFailure: z.boolean().optional(),
+            healthCheckTimeout: z.number().int().positive().optional(),
+          })
+          .strict()
+          .optional(),
+        watch: z
+          .object({
+            autoRestart: z.boolean().optional(),
+            logChanges: z.boolean().optional(),
           })
           .strict()
           .optional(),

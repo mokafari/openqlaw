@@ -70,6 +70,8 @@ export type CronJobMetadata = {
     filter?: Record<string, unknown>;
   };
   camping?: boolean;
+  /** Session key for camping wake (used to exit the correct CampingManager entry). */
+  sessionKey?: string;
   [key: string]: unknown;
 };
 

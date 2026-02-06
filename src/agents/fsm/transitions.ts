@@ -4,6 +4,8 @@
  * Defines valid state transitions and their conditions.
  */
 
+import type { NamedCapability } from "../aas/context-graph.js";
+import type { ReachabilityCheckContext } from "../aas/types.js";
 import type { AgentState } from "./states.js";
 
 export type TransitionCondition = {
@@ -101,4 +103,60 @@ export function getDefaultTransition(
 
   // Return first allowed transition as default
   return allowed[0];
+}
+
+/**
+ * Capability requirements for target states.
+ * Transitions to these states require the listed capabilities to be available.
+ */
+export const STATE_CAPABILITY_REQUIREMENTS: Partial<Record<AgentState, NamedCapability[]>> = {
+  executing: ["CanRead"],
+  mutating: ["CanCommit", "CanWrite"],
+  self_correcting: ["CanRead", "CanWrite"],
+};
+
+/**
+ * Async transition check that validates both FSM rules and capability requirements.
+ * Falls back to basic canTransition when no reachability context is provided.
+ */
+export async function canTransitionAsync(
+  from: AgentState,
+  to: AgentState,
+  reachCtx?: ReachabilityCheckContext,
+): Promise<{ allowed: boolean; reason?: string }> {
+  if (!canTransition(from, to)) {
+    return {
+      allowed: false,
+      reason: `Transition from ${from} to ${to} is not allowed by FSM rules`,
+    };
+  }
+
+  if (!reachCtx) {
+    return { allowed: true };
+  }
+
+  const required = STATE_CAPABILITY_REQUIREMENTS[to];
+  if (!required || required.length === 0) {
+    return { allowed: true };
+  }
+
+  // Lazy import to avoid circular dependency at module load time
+  const { ContextGraph } = await import("../aas/context-graph.js");
+
+  const missing: string[] = [];
+  for (const cap of required) {
+    const available = await ContextGraph.check(reachCtx, cap);
+    if (!available) {
+      missing.push(cap);
+    }
+  }
+
+  if (missing.length > 0) {
+    return {
+      allowed: false,
+      reason: `Missing capabilities for state ${to}: ${missing.join(", ")}`,
+    };
+  }
+
+  return { allowed: true };
 }

@@ -644,7 +644,13 @@ export async function buildAgentSystemPrompt(params: {
         "## Agent State (FSM)",
         `Current state: ${params.fsmState}`,
         `Description: ${description}`,
-        "Use goal_push/goal_pop/goal_status tools to manage multi-step tasks.",
+        "",
+        "**State Machine Behavior:**",
+        "- States represent your current operational mode (idle, planning, executing, camping, etc.)",
+        "- State transitions happen automatically based on your actions and system events",
+        "- When blocked by an obstacle, you may transition to 'retreating' to handle errors",
+        "- For long-running processes (builds, deployments), you can enter 'camping' state to wait for events",
+        "- Use the goal stack tools (goal_push/goal_pop/goal_status) to manage multi-step tasks with obstacles",
         "",
       );
     } catch {
@@ -652,14 +658,32 @@ export async function buildAgentSystemPrompt(params: {
       quakeBotSections.push(
         "## Agent State (FSM)",
         `Current state: ${params.fsmState}`,
-        "Use goal_push/goal_pop/goal_status tools to manage multi-step tasks.",
+        "",
+        "**State Machine Behavior:**",
+        "- States represent your current operational mode",
+        "- State transitions happen automatically based on your actions",
+        "- Use goal_push/goal_pop/goal_status tools to manage multi-step tasks",
         "",
       );
     }
   }
 
   if (params.goalStackSummary) {
-    quakeBotSections.push("## Goal Stack", params.goalStackSummary, "");
+    quakeBotSections.push(
+      "## Goal Stack",
+      params.goalStackSummary,
+      "",
+      "**Goal Stack Usage:**",
+      "- The goal stack is a LIFO (Last-In-First-Out) structure for recursive task resolution",
+      "- When you encounter an obstacle (e.g., 'Docker daemon not running'), push it as a sub-goal",
+      "- Solve the obstacle first, then pop it and resume the original goal",
+      "- Use goal_push to add new goals/subgoals, goal_pop to complete and remove goals",
+      "- Use goal_block to mark the current goal as blocked by an obstacle",
+      "- Use goal_unblock to clear a blocked goal after resolving the obstacle",
+      "- Use goal_status to view the current stack state (summary or full visualization)",
+      "- Example: 'Deploy app' → blocked by 'Docker not running' → goal_block('Docker not running') → push 'Start Docker' → solve → goal_unblock → pop → resume deployment",
+      "",
+    );
   }
 
   if (params.activeClusters && params.activeClusters.length > 0) {
@@ -667,6 +691,81 @@ export async function buildAgentSystemPrompt(params: {
       "## Active Tool Clusters",
       `Currently active: ${params.activeClusters.join(", ")}`,
       "Tools are grouped by operational context to reduce token usage.",
+      "",
+    );
+  }
+
+  // Add Quake Bot Engine capabilities section if any Quake features are active
+  if (params.fsmState || params.goalStackSummary) {
+    quakeBotSections.push(
+      "## Quake Bot Engine Capabilities",
+      "",
+      "**Area Awareness System (AAS):**",
+      "- Before attempting actions, the system checks reachability (READ/WRITE/NETWORK/AUTH/ELEVATED capabilities)",
+      "- If a capability is missing, you'll be informed and should plan a route to acquire it first",
+      "- Example: If 'CanDeploy' requires Docker CLI + Dockerfile + running daemon, check prerequisites before proposing deployment",
+      "",
+      "**Camping (Event-Driven Waiting):**",
+      "- Instead of busy-looping, use camping state for long-running processes",
+      "- Use the cron tool with 'camp' action to wait for scheduled events or webhooks",
+      "- The system will automatically wake you when the event fires or timeout is reached",
+      "- Example: After triggering a CI pipeline, enter camping state and wait for the webhook callback",
+      "",
+      "**Context Depth Filtering (BSP):**",
+      "- Context files are automatically filtered by depth to reduce token usage",
+      "- Portal files (package.json, SOUL.md, README.md) are always included regardless of depth",
+      "- When working at file level (depth 3), you won't see irrelevant global configs (depth 0)",
+      "",
+    );
+  }
+
+  // Add self-modification/evolution instructions if evolution tools are available
+  const hasEvolutionTools =
+    params.toolNames?.some((name) =>
+      ["evolution_propose_patch", "evolution_run_dojo_test", "evolution_list_patches"].includes(
+        name.toLowerCase(),
+      ),
+    ) ?? false;
+
+  if (hasEvolutionTools) {
+    quakeBotSections.push(
+      "## Self-Modification & Evolution",
+      "",
+      "**Self-Modification Capabilities:**",
+      "- You have access to evolution tools for autonomous self-improvement",
+      "- Use evolution_propose_patch to generate code patches for identified issues or improvements",
+      "- Use evolution_run_dojo_test to validate changes against the Dojo evaluation suite",
+      "- Use evolution_list_patches to view pending and applied patches",
+      "",
+      "**When to Use Self-Modification:**",
+      "- Fix identified bugs or performance issues in your own code",
+      "- Optimize functions to reduce token usage or improve efficiency",
+      "- Add new capabilities based on telemetry and user feedback",
+      "- Always validate changes with Dojo tests before applying",
+      "",
+      "**Automatic Recovery System:**",
+      "- The system includes automatic recovery for build failures and system errors",
+      "- When build failures occur, the recovery system:",
+      "  1. Parses errors from build logs",
+      "  2. Spawns diagnostic agents to analyze root causes",
+      "  3. Attempts automatic fixes with retries and backups",
+      "  4. Validates fixes using the Dojo test suite",
+      "  5. Alerts you if recovery fails after maximum attempts",
+      "- Recovery state is persisted and can resume after restarts",
+      "- Recovery integrates with the evolution system for continuous improvement",
+      "",
+      "**Evolution & Recovery Workflow:**",
+      "- Telemetry tracks tool error rates and identifies hotspots",
+      "- Hotspots trigger diagnostic analysis and patch proposals",
+      "- Patches are validated through policy guards and Dojo tests",
+      "- Successful patches improve system performance over time",
+      "- Recovery attempts are logged for learning and refinement",
+      "",
+      "**Safety:**",
+      "- Self-modification is gated by policy guardrails",
+      "- Critical safety files are protected from modification",
+      "- All changes are validated in the Dojo harness before application",
+      "- Recovery has maximum retry limits to prevent infinite loops",
       "",
     );
   }

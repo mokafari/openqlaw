@@ -4,9 +4,10 @@
  * Manages agent state transitions and enforces state discipline.
  */
 
+import type { ReachabilityCheckContext } from "../aas/types.js";
 import type { AgentState } from "./states.js";
 import { getStateDescription } from "./states.js";
-import { canTransition, getDefaultTransition } from "./transitions.js";
+import { canTransition, canTransitionAsync, getDefaultTransition } from "./transitions.js";
 
 export type FSMContext = {
   success?: boolean;
@@ -69,6 +70,34 @@ export class FSMController {
       return false;
     }
     return this.transition(nextState, context);
+  }
+
+  /**
+   * Attempt to transition with async capability checks via ContextGraph.
+   * Falls back to basic canTransition when no reachability context is provided.
+   */
+  async transitionAsync(
+    to: AgentState,
+    context?: FSMContext,
+    reachCtx?: ReachabilityCheckContext,
+  ): Promise<{ success: boolean; reason?: string }> {
+    const check = await canTransitionAsync(this.currentState, to, reachCtx);
+    if (!check.allowed) {
+      return { success: false, reason: check.reason };
+    }
+
+    this.currentState = to;
+    this.stateHistory.push({
+      state: to,
+      timestamp: Date.now(),
+      context,
+    });
+
+    if (this.stateHistory.length > this.maxHistorySize) {
+      this.stateHistory = this.stateHistory.slice(-this.maxHistorySize);
+    }
+
+    return { success: true };
   }
 
   /**
