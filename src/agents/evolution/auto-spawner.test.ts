@@ -17,22 +17,6 @@ describe("AutoSpawner", () => {
   const mockLogs = "Building...\nError: Type mismatch\nBuild failed";
 
   describe("spawnCodingAgent", () => {
-    it("should return sessions-spawn method for pi strategy", async () => {
-      const params: SpawnCodingAgentParams = {
-        error: mockError,
-        logs: mockLogs,
-        workspaceDir: "/test/workspace",
-        strategy: "pi",
-      };
-
-      const result = await spawner.spawnCodingAgent(params);
-
-      expect(result.method).toBe("sessions-spawn");
-      expect(result.task).toBeDefined();
-      expect(result.task).toContain("TS2322");
-      expect(result.task).toContain("src/test.ts");
-    });
-
     it("should return sessions-spawn method for sessions-spawn strategy", async () => {
       const params: SpawnCodingAgentParams = {
         error: mockError,
@@ -45,20 +29,22 @@ describe("AutoSpawner", () => {
 
       expect(result.method).toBe("sessions-spawn");
       expect(result.task).toBeDefined();
+      expect(result.task).toContain("TS2322");
+      expect(result.task).toContain("src/test.ts");
     });
 
-    it("should return shell method for codex strategy", async () => {
+    it("should return shell method for gemini strategy", async () => {
       const params: SpawnCodingAgentParams = {
         error: mockError,
         logs: mockLogs,
         workspaceDir: "/test/workspace",
-        strategy: "codex",
+        strategy: "gemini",
       };
 
       const result = await spawner.spawnCodingAgent(params);
 
       expect(result.method).toBe("shell");
-      expect(result.command).toContain("codex");
+      expect(result.command).toContain("gemini");
       expect(result.command).toContain("/test/workspace");
     });
 

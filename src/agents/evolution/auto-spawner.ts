@@ -5,7 +5,7 @@ export type SpawnCodingAgentParams = {
   error: ParsedError;
   logs: string;
   workspaceDir: string;
-  strategy: "claude-code" | "codex" | "opencode" | "pi" | "sessions-spawn";
+  strategy: "claude-code" | "gemini" | "sessions-spawn";
 };
 
 export type SpawnResult = {
@@ -96,9 +96,10 @@ If you cannot fix the error after 3 attempts, report the issue and suggest manua
 
   /**
    * Build shell command for external coding agent CLIs.
+   * Supports: claude-code (Claude Code CLI) and gemini (Gemini CLI)
    */
   private buildShellCommand(
-    strategy: Exclude<SpawnCodingAgentParams["strategy"], "sessions-spawn" | "pi">,
+    strategy: Exclude<SpawnCodingAgentParams["strategy"], "sessions-spawn">,
     task: string,
     workspaceDir: string,
   ): string {
@@ -106,17 +107,18 @@ If you cannot fix the error after 3 attempts, report the issue and suggest manua
     const escapedTask = task.replace(/'/g, "'\\''").replace(/\n/g, "\\n");
 
     switch (strategy) {
-      case "codex":
-        return `cd ${workspaceDir} && codex -a '${escapedTask}'`;
-
       case "claude-code":
+        // Claude Code CLI: claude -p for print mode (non-interactive)
         return `cd ${workspaceDir} && claude -p '${escapedTask}'`;
 
-      case "opencode":
-        return `cd ${workspaceDir} && opencode '${escapedTask}'`;
+      case "gemini":
+        // Gemini CLI: gemini for interactive prompts
+        return `cd ${workspaceDir} && gemini '${escapedTask}'`;
 
       default:
-        throw new Error(`Unknown coding agent strategy: ${strategy}`);
+        throw new Error(
+          `Unknown coding agent strategy: ${strategy}. Supported: claude-code, gemini`,
+        );
     }
   }
 

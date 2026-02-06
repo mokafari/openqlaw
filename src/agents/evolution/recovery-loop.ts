@@ -22,7 +22,7 @@ export type RecoveryLoopParams = {
   workspaceDir: string;
   maxRetries: number;
   decision: RecoveryDecision;
-  agentStrategy?: "claude-code" | "codex" | "opencode" | "pi";
+  agentStrategy?: "claude-code" | "gemini" | "sessions-spawn";
 };
 
 /**
@@ -81,10 +81,7 @@ export class RecoveryLoop {
             error: params.error,
             logs: params.logs,
             workspaceDir: this.workspaceDir,
-            strategy:
-              params.agentStrategy === "pi"
-                ? "sessions-spawn"
-                : (params.agentStrategy ?? "sessions-spawn"),
+            strategy: params.agentStrategy ?? "sessions-spawn",
           });
 
           if (spawnResult.method === "sessions-spawn" && spawnResult.task) {
