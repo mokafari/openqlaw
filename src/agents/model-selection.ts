@@ -2,9 +2,9 @@ import type { OpenClawConfig } from "../config/config.js";
 import type { ModelCatalogEntry } from "./model-catalog.js";
 import { resolveAgentModelPrimary } from "./agent-scope.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
-import { normalizeGoogleModelId } from "./models-config.providers.js";
 import { FuzzyModelSelector } from "./evolution/fuzzy-model-selector.js";
 import { analyzeTaskComplexity } from "./fuzzy-selector.js";
+import { normalizeGoogleModelId } from "./models-config.providers.js";
 
 export type ModelRef = {
   provider: string;
@@ -212,8 +212,6 @@ export function resolveDefaultModelForAgent(params: {
   const evolutionEnabled = params.cfg.tools?.evolution?.selfModification?.enabled ?? false;
   if (evolutionEnabled && params.sessionEntry) {
     try {
-      const { FuzzyModelSelector } = await import("./evolution/fuzzy-model-selector.js");
-      const { analyzeTaskComplexity } = await import("./fuzzy-selector.js");
       const selector = new FuzzyModelSelector(params.cfg);
 
       if (params.prompt) {

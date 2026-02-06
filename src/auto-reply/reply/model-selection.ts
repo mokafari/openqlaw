@@ -323,6 +323,16 @@ export async function createModelSelectionState(params: {
     });
     allowedModelCatalog = allowed.allowedCatalog;
     allowedModelKeys = allowed.allowedKeys;
+
+    // Validate the initial model against the allowlist: if the global default
+    // isn't in the allowed set, fall back to the caller's default provider/model.
+    if (allowedModelKeys.size > 0 && !params.hasModelDirective) {
+      const initialKey = modelKey(provider, model);
+      if (!allowedModelKeys.has(initialKey)) {
+        provider = defaultProvider;
+        model = defaultModel;
+      }
+    }
   }
 
   if (sessionEntry && sessionStore && sessionKey && hasStoredOverride) {
