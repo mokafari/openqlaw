@@ -93,6 +93,20 @@ export function stateToQuakeNode(state: AgentState): QuakeNode {
   return mapping[state] ?? "NODE_STAND";
 }
 
+/**
+ * Quake node mapping (exported for documentation/iteration)
+ */
+export const QUAKE_NODE_MAPPING: Partial<Record<AgentState, QuakeNode>> = {
+  idle: "NODE_STAND",
+  planning: "NODE_PLAN",
+  executing: "NODE_SEEK_GOAL",
+  retreating: "NODE_BATTLE_ERROR",
+  camping: "NODE_CAMP",
+  diagnostic: "NODE_DIAGNOSTIC",
+  mutating: "NODE_MUTATION",
+  self_correcting: "NODE_VERIFICATION",
+};
+
 export const STATE_DESCRIPTIONS: Record<AgentState, string> = {
   idle: "Agent is idle, waiting for input",
   gathering_info: "Collecting information needed for the task",

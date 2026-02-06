@@ -93,6 +93,38 @@ describe("CampingManager", () => {
     });
   });
 
+  describe("getState", () => {
+    it("should return camping state when exists (alias for getCamping)", () => {
+      const camping = globalCampingManager.enterCamping({
+        sessionId: "session-123",
+        waitingFor: "process",
+        triggerId: "pid-456",
+        resumeCondition: "exit",
+      });
+
+      const retrieved = globalCampingManager.getState("session-123");
+      expect(retrieved).toEqual(camping);
+    });
+
+    it("should return undefined when camping state does not exist", () => {
+      const retrieved = globalCampingManager.getState("session-123");
+      expect(retrieved).toBeUndefined();
+    });
+
+    it("should return same result as getCamping", () => {
+      globalCampingManager.enterCamping({
+        sessionId: "session-123",
+        waitingFor: "webhook",
+        triggerId: "webhook-123",
+        resumeCondition: "received",
+      });
+
+      const viaGetCamping = globalCampingManager.getCamping("session-123");
+      const viaGetState = globalCampingManager.getState("session-123");
+      expect(viaGetState).toEqual(viaGetCamping);
+    });
+  });
+
   describe("exitCamping", () => {
     it("should remove camping state", () => {
       globalCampingManager.enterCamping({

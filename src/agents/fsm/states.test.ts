@@ -7,6 +7,7 @@ import {
   isValidQuakeNode,
   isValidState,
   isValidTransition,
+  QUAKE_NODE_MAPPING,
   quakeNodeToState,
   stateToQuakeNode,
   VALID_TRANSITIONS,
@@ -212,6 +213,36 @@ describe("FSM States", () => {
       expect(transitions).toContain("reporting");
       expect(transitions).toContain("mutating");
       expect(transitions).toContain("idle");
+    });
+  });
+
+  describe("QUAKE_NODE_MAPPING", () => {
+    it("should be exported and contain state mappings", () => {
+      expect(QUAKE_NODE_MAPPING).toBeDefined();
+      expect(typeof QUAKE_NODE_MAPPING).toBe("object");
+    });
+
+    it("should map idle to NODE_STAND", () => {
+      expect(QUAKE_NODE_MAPPING.idle).toBe("NODE_STAND");
+    });
+
+    it("should map planning to NODE_PLAN", () => {
+      expect(QUAKE_NODE_MAPPING.planning).toBe("NODE_PLAN");
+    });
+
+    it("should map executing to NODE_SEEK_GOAL", () => {
+      expect(QUAKE_NODE_MAPPING.executing).toBe("NODE_SEEK_GOAL");
+    });
+
+    it("should map camping to NODE_CAMP", () => {
+      expect(QUAKE_NODE_MAPPING.camping).toBe("NODE_CAMP");
+    });
+
+    it("should match stateToQuakeNode function", () => {
+      expect(QUAKE_NODE_MAPPING.idle).toBe(stateToQuakeNode("idle"));
+      expect(QUAKE_NODE_MAPPING.planning).toBe(stateToQuakeNode("planning"));
+      expect(QUAKE_NODE_MAPPING.executing).toBe(stateToQuakeNode("executing"));
+      expect(QUAKE_NODE_MAPPING.camping).toBe(stateToQuakeNode("camping"));
     });
   });
 });

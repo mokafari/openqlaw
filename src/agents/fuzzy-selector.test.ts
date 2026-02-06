@@ -51,6 +51,10 @@ describe("FuzzySelector", () => {
         contextBudget: 0.8,
       });
       expect(selection.model).toContain("opus");
+      expect(selection.tier).toBe("BFG10K");
+      expect(selection.scores).toBeDefined();
+      expect(selection.scores?.complexity).toBe(0.9);
+      expect(selection.scores?.budget).toBe(0.8);
     });
 
     it("should select low-end model for simple tasks", () => {
@@ -59,6 +63,8 @@ describe("FuzzySelector", () => {
         contextBudget: 0.5,
       });
       expect(selection.model).toContain("haiku");
+      expect(selection.tier).toBe("Machine Gun");
+      expect(selection.scores).toBeDefined();
     });
 
     it("should handle default provider", () => {
@@ -68,6 +74,17 @@ describe("FuzzySelector", () => {
         defaultProvider: "anthropic",
       });
       expect(selection.provider).toBe("anthropic");
+      expect(selection.tier).toBeDefined();
+      expect(selection.scores).toBeDefined();
+    });
+
+    it("should include tier in response", () => {
+      const selection = selectModelFuzzy({
+        taskComplexity: 0.6,
+        contextBudget: 0.6,
+      });
+      expect(selection.tier).toBeDefined();
+      expect(["BFG10K", "Sonnet", "Machine Gun"]).toContain(selection.tier);
     });
   });
 });

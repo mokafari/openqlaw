@@ -13,6 +13,17 @@ import { checkReachabilityType } from "./reachability.js";
 export type NamedCapability = "CanCommit" | "CanDeploy" | "CanRead" | "CanWrite" | "CanNetwork";
 
 /**
+ * Array of all named capabilities (for iteration/validation)
+ */
+export const NAMED_CAPABILITIES: readonly NamedCapability[] = [
+  "CanCommit",
+  "CanDeploy",
+  "CanRead",
+  "CanWrite",
+  "CanNetwork",
+] as const;
+
+/**
  * Context Graph - Provides high-level capability checks
  */
 export class ContextGraph {

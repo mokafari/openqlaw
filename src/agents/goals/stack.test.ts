@@ -302,6 +302,44 @@ describe("GoalStack", () => {
     });
   });
 
+  describe("getCompleted", () => {
+    it("should return all completed goals", () => {
+      const stack = new GoalStack(sessionKey);
+      const id1 = stack.push({ type: "task", description: "Goal 1" });
+      const id2 = stack.push({ type: "task", description: "Goal 2" });
+      const id3 = stack.push({ type: "task", description: "Goal 3" });
+
+      stack.complete(id1);
+      stack.complete(id2);
+
+      const completed = stack.getCompleted();
+      expect(completed.length).toBe(2);
+      expect(completed.map((g) => g.id)).toContain(id1);
+      expect(completed.map((g) => g.id)).toContain(id2);
+      expect(completed.map((g) => g.id)).not.toContain(id3);
+    });
+
+    it("should return empty array when no goals completed", () => {
+      const stack = new GoalStack(sessionKey);
+      stack.push({ type: "task", description: "Goal 1" });
+
+      const completed = stack.getCompleted();
+      expect(completed.length).toBe(0);
+    });
+
+    it("should include goals completed via pop", () => {
+      const stack = new GoalStack(sessionKey);
+      const id1 = stack.push({ type: "task", description: "Goal 1" });
+      const id2 = stack.push({ type: "task", description: "Goal 2" });
+
+      stack.pop(); // This marks id2 as completed
+
+      const completed = stack.getCompleted();
+      expect(completed.length).toBe(1);
+      expect(completed.map((g) => g.id)).toContain(id2);
+    });
+  });
+
   describe("serialize and deserialize", () => {
     it("should serialize stack state", () => {
       const stack = new GoalStack(sessionKey);

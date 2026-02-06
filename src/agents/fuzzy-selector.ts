@@ -13,6 +13,18 @@ export type TaskComplexity = number; // 0.0 (simple) to 1.0 (complex)
 export type ContextBudget = number; // 0.0 (low) to 1.0 (high)
 export type UserUrgency = number; // 0.0 (low) to 1.0 (high)
 
+export type ModelTier = "BFG10K" | "Sonnet" | "Machine Gun";
+
+export type FuzzySelectionResult = ModelRef & {
+  tier: ModelTier;
+  scores?: {
+    complexity: number;
+    budget: number;
+    urgency: number;
+    weight: number;
+  };
+};
+
 export type FuzzySelectionParams = {
   taskComplexity: TaskComplexity;
   contextBudget: ContextBudget;
@@ -106,7 +118,7 @@ export function calculateContextBudget(contextWindow: number, usedTokens: number
  * Uses switch/case style fuzzy logic similar to Quake III Bot's
  * weapon selection system.
  */
-export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
+export function selectModelFuzzy(params: FuzzySelectionParams): FuzzySelectionResult {
   const {
     taskComplexity,
     contextBudget,
@@ -128,6 +140,13 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
     return {
       provider: defaultProvider,
       model: "claude-opus-4-5", // BFG10K - most powerful
+      tier: "BFG10K",
+      scores: {
+        complexity: taskComplexity,
+        budget: contextBudget,
+        urgency: userUrgency,
+        weight,
+      },
     };
   }
 
@@ -136,6 +155,13 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
     return {
       provider: defaultProvider,
       model: "claude-haiku-4-5", // Machine Gun - fast and cheap
+      tier: "Machine Gun",
+      scores: {
+        complexity: taskComplexity,
+        budget: contextBudget,
+        urgency: userUrgency,
+        weight,
+      },
     };
   }
 
@@ -144,6 +170,13 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
     return {
       provider: defaultProvider,
       model: "claude-haiku-4-5", // Fast response for urgent simple tasks
+      tier: "Machine Gun",
+      scores: {
+        complexity: taskComplexity,
+        budget: contextBudget,
+        urgency: userUrgency,
+        weight,
+      },
     };
   }
 
@@ -152,6 +185,13 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
     return {
       provider: defaultProvider,
       model: defaultModel, // Default balanced model
+      tier: "Sonnet",
+      scores: {
+        complexity: taskComplexity,
+        budget: contextBudget,
+        urgency: userUrgency,
+        weight,
+      },
     };
   }
 
@@ -160,6 +200,13 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
     return {
       provider: defaultProvider,
       model: "claude-sonnet-4-5", // Efficient for high complexity
+      tier: "Sonnet",
+      scores: {
+        complexity: taskComplexity,
+        budget: contextBudget,
+        urgency: userUrgency,
+        weight,
+      },
     };
   }
 
@@ -167,6 +214,13 @@ export function selectModelFuzzy(params: FuzzySelectionParams): ModelRef {
   return {
     provider: defaultProvider,
     model: "claude-opus-4-5",
+    tier: "BFG10K",
+    scores: {
+      complexity: taskComplexity,
+      budget: contextBudget,
+      urgency: userUrgency,
+      weight,
+    },
   };
 }
 

@@ -69,6 +69,13 @@ export class CampingManager {
   }
 
   /**
+   * Alias for getCamping (for API consistency)
+   */
+  getState(sessionId: string): CampingState | undefined {
+    return this.getCamping(sessionId);
+  }
+
+  /**
    * Check if session is camping
    */
   isCamping(sessionId: string): boolean {

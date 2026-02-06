@@ -180,6 +180,13 @@ export class GoalStack {
   }
 
   /**
+   * Get completed goals
+   */
+  getCompleted(): Goal[] {
+    return this.goals.filter((g) => g.status === "completed");
+  }
+
+  /**
    * Clear all goals
    */
   clear(): void {

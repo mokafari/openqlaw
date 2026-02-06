@@ -86,6 +86,11 @@ export function selectSynonym(
 }
 
 /**
+ * Alias for selectSynonym (for backwards compatibility)
+ */
+export const pickSynonym = selectSynonym;
+
+/**
  * Customize synonym dictionary
  */
 export function customizeSynonyms(
