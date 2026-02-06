@@ -132,11 +132,15 @@ async function main() {
       `gateway: received ${signal}; ${isRestart ? "restarting" : "shutting down"}`,
     );
 
+    // Increase shutdown timeout to 15 seconds to allow active agent runs to complete
+    const SHUTDOWN_TIMEOUT_MS = 15000;
     forceExitTimer = setTimeout(() => {
-      defaultRuntime.error("gateway: shutdown timed out; exiting without full cleanup");
+      defaultRuntime.error(
+        `gateway: shutdown timed out after ${SHUTDOWN_TIMEOUT_MS / 1000}s; exiting without full cleanup`,
+      );
       cleanupSignals();
       process.exit(0);
-    }, 5000);
+    }, SHUTDOWN_TIMEOUT_MS);
 
     void (async () => {
       try {

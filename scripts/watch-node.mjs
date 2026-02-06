@@ -57,6 +57,11 @@ compilerProcess.stderr?.on("data", (chunk) => {
 let nodeProcess = null;
 let exiting = false;
 let healthMonitorHandle = null;
+let gatewayRestartAttempts = 0;
+let gatewayStartTime = null;
+const MAX_RESTART_ATTEMPTS = 5;
+const RESTART_DELAY_MS = 2000; // 2 seconds between restart attempts
+const GATEWAY_STABLE_TIME_MS = 10000; // Consider gateway stable after 10 seconds
 
 function spawnNode() {
   const child = spawn(process.execPath, ["openclaw.mjs", ...args], {
@@ -64,18 +69,93 @@ function spawnNode() {
     env,
     stdio: "inherit",
   });
-  child.on("exit", (code, signal) => {
-    if (signal || exiting) {
+  gatewayStartTime = Date.now();
+  child.on("exit", async (code, signal) => {
+    // If we're intentionally shutting down, don't restart
+    if (exiting) {
       return;
     }
+
+    // If killed by signal (SIGTERM/SIGINT), don't restart (user/OS initiated)
+    if (signal) {
+      console.log(`[watch-node] Gateway process killed by signal: ${signal}`);
+      cleanup(code ?? 1);
+      return;
+    }
+
     // If entry.js is missing, the build is in progress — wait for it
     if (!existsSync(ENTRY_FILE)) {
-      console.log("[watch-node] Node exited while dist/ is being rebuilt. Waiting for build…");
+      console.log("[watch-node] Gateway exited while dist/ is being rebuilt. Waiting for build…");
       nodeProcess = null;
       return;
     }
-    // Real crash — propagate
-    cleanup(code ?? 1);
+
+    // Gateway process exited unexpectedly (even with code 0, e.g., shutdown timeout)
+    const uptime = gatewayStartTime ? Date.now() - gatewayStartTime : 0;
+    const wasStable = uptime > GATEWAY_STABLE_TIME_MS;
+
+    // Reset restart counter if gateway ran successfully for a while
+    if (wasStable) {
+      console.log(`[watch-node] Gateway was stable for ${Math.round(uptime / 1000)}s before exit`);
+      gatewayRestartAttempts = 0; // Reset counter on stable exit
+    } else {
+      gatewayRestartAttempts++;
+      console.log(
+        `[watch-node] Gateway exited quickly (${Math.round(uptime / 1000)}s), restart attempt ${gatewayRestartAttempts}/${MAX_RESTART_ATTEMPTS}`,
+      );
+    }
+
+    if (gatewayRestartAttempts > MAX_RESTART_ATTEMPTS) {
+      console.error(
+        `[watch-node] Gateway restart attempts exceeded ${MAX_RESTART_ATTEMPTS}. Exiting.`,
+      );
+      cleanup(1);
+      return;
+    }
+
+    // Check if this might be a shutdown timeout (code 0)
+    const isShutdownTimeout = code === 0;
+
+    if (isShutdownTimeout) {
+      console.log("[watch-node] Detected potential shutdown timeout - attempting recovery...");
+
+      // Try to spawn recovery agent for shutdown timeout
+      try {
+        const recoveryPath = join(cwd, "dist", "agents", "evolution", "gateway-recovery.js");
+        if (existsSync(recoveryPath)) {
+          const recoveryModule = await import(`file://${recoveryPath}`);
+          const { GatewayRecovery } = recoveryModule;
+
+          const recovery = new GatewayRecovery({
+            workspaceDir: cwd,
+            maxRetries: 3,
+            agentStrategy: "claude-code",
+          });
+
+          await recovery.handleBuildFailure({
+            buildLog: `Gateway shutdown timed out (exit code ${code}, uptime ${Math.round(uptime / 1000)}s). This may indicate a problem with graceful shutdown or resource cleanup.`,
+            workspaceDir: cwd,
+            exitCode: code,
+          });
+        }
+      } catch (err) {
+        console.warn(`[watch-node] Recovery system unavailable: ${err.message}`);
+      }
+    }
+
+    // Restart the gateway after a delay
+    console.log(`[watch-node] Restarting gateway in ${RESTART_DELAY_MS}ms...`);
+    nodeProcess = null;
+    gatewayStartTime = null;
+
+    setTimeout(() => {
+      if (!exiting && existsSync(ENTRY_FILE)) {
+        console.log("[watch-node] Spawning new gateway process...");
+        nodeProcess = spawnNode();
+      } else if (!existsSync(ENTRY_FILE)) {
+        console.log("[watch-node] Waiting for build to complete before restarting gateway...");
+      }
+    }, RESTART_DELAY_MS);
   });
   return child;
 }
