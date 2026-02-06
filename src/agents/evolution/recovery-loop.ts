@@ -77,17 +77,23 @@ export class RecoveryLoop {
           }
         } else if (params.decision.strategy === "spawn-agent") {
           const spawner = new AutoSpawner();
-          const { command } = await spawner.spawnCodingAgent({
+          const spawnResult = await spawner.spawnCodingAgent({
             error: params.error,
             logs: params.logs,
             workspaceDir: this.workspaceDir,
-            strategy: params.agentStrategy ?? "claude-code",
+            strategy:
+              params.agentStrategy === "pi"
+                ? "sessions-spawn"
+                : (params.agentStrategy ?? "sessions-spawn"),
           });
 
-          // Execute command via bash (would be done via bash tool in real scenario)
-          // For now, we'll just verify the build after a delay
-          // In practice, this would use the exec tool with background mode
-          await this.waitForAgentCompletion(command, 300000); // 5 minute timeout
+          if (spawnResult.method === "sessions-spawn" && spawnResult.task) {
+            // Use native sessions_spawn via gateway RPC
+            await this.spawnSubAgent(spawnResult.task, params.decision.estimatedTime);
+          } else if (spawnResult.command) {
+            // Fall back to shell command execution
+            await this.executeShellAgent(spawnResult.command, params.decision.estimatedTime);
+          }
         }
 
         // 3. Verify build
@@ -162,15 +168,59 @@ export class RecoveryLoop {
   }
 
   /**
-   * Wait for agent completion (simplified - in practice would use process tool).
+   * Spawn a sub-agent using OpenClaw's native sessions_spawn.
+   */
+  private async spawnSubAgent(task: string, estimatedTimeMs: number): Promise<void> {
+    try {
+      const { callGateway } = await import("../../gateway/call.js");
+
+      // Call sessions_spawn via gateway RPC
+      const result = await callGateway({
+        method: "sessions.spawn",
+        params: {
+          task,
+          label: `recovery-${Date.now()}`,
+          runTimeoutSeconds: Math.ceil(estimatedTimeMs / 1000),
+          cleanup: "keep",
+        },
+        timeoutMs: estimatedTimeMs + 30000, // Add buffer for startup
+      });
+
+      log.info(`[recovery] Sub-agent spawned: ${JSON.stringify(result)}`);
+    } catch (err) {
+      log.error(
+        `[recovery] Failed to spawn sub-agent: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // Fall through to verification - agent might still have fixed something
+    }
+  }
+
+  /**
+   * Execute a shell-based coding agent (codex, claude-code, etc.)
+   */
+  private async executeShellAgent(command: string, estimatedTimeMs: number): Promise<void> {
+    try {
+      const timeoutMs = Math.min(estimatedTimeMs, 300000); // Max 5 minutes
+
+      await runCommandWithTimeout(["bash", "-c", command], {
+        timeoutMs,
+        cwd: this.workspaceDir,
+      });
+
+      log.info(`[recovery] Shell agent completed`);
+    } catch (err) {
+      log.error(
+        `[recovery] Shell agent failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // Fall through to verification
+    }
+  }
+
+  /**
+   * Wait for agent completion (legacy method for backward compatibility).
    */
   private async waitForAgentCompletion(command: string, timeoutMs: number): Promise<void> {
-    // In practice, this would:
-    // 1. Spawn command via bash tool with background: true
-    // 2. Get sessionId
-    // 3. Poll process tool until complete
-    // For now, just wait a reasonable time
-    await new Promise((resolve) => setTimeout(resolve, Math.min(timeoutMs, 60000)));
+    await this.executeShellAgent(command, timeoutMs);
   }
 
   /**

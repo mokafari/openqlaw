@@ -199,11 +199,12 @@ export async function applyPatchToCodebase(
 }
 
 /**
- * Revert a patch.
- * This would need to store the original file contents or use git to revert.
- * For now, this is a placeholder that marks the patch as reverted.
+ * Revert a patch by restoring files from git or backup.
  */
-export async function revertPatch(patchId: string): Promise<{ success: boolean; error?: string }> {
+export async function revertPatch(
+  patchId: string,
+  workspaceDir?: string,
+): Promise<{ success: boolean; error?: string }> {
   const patch = await loadPatch(patchId);
   if (!patch) {
     return { success: false, error: `Patch ${patchId} not found` };
@@ -213,8 +214,112 @@ export async function revertPatch(patchId: string): Promise<{ success: boolean; 
     return { success: false, error: `Patch ${patchId} is not in applied status` };
   }
 
-  // TODO: Implement actual reversion logic (git revert or restore from backup)
-  // For now, just mark as reverted
-  await updatePatchStatus(patchId, "reverted");
-  return { success: true };
+  const cwd = workspaceDir ?? process.cwd();
+
+  try {
+    // Get list of files affected by this patch
+    const affectedFiles = patch.metadata.files.map((f) => f.path);
+
+    if (affectedFiles.length === 0) {
+      // No files to revert, just mark as reverted
+      await updatePatchStatus(patchId, "reverted");
+      return { success: true };
+    }
+
+    // Try to revert using git checkout
+    const { execSync } = await import("node:child_process");
+
+    for (const file of affectedFiles) {
+      try {
+        // First try: restore from git HEAD
+        execSync(`git checkout HEAD -- "${file}"`, {
+          cwd,
+          stdio: "pipe",
+          encoding: "utf-8",
+        });
+      } catch {
+        // If file wasn't in git, try to remove it (it was added by patch)
+        try {
+          const filePath = path.join(cwd, file);
+          await fs.unlink(filePath);
+        } catch {
+          // File doesn't exist or can't be removed, continue
+        }
+      }
+    }
+
+    await updatePatchStatus(patchId, "reverted");
+    return { success: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    await updatePatchStatus(patchId, "failed", { error: `Revert failed: ${error}` });
+    return { success: false, error };
+  }
+}
+
+/**
+ * Create a backup of files before patching.
+ */
+export async function createPatchBackup(
+  patchId: string,
+  files: string[],
+  workspaceDir?: string,
+): Promise<{ backupDir: string }> {
+  const cwd = workspaceDir ?? process.cwd();
+  const backupDir = path.join(PATCHES_DIR, "backups", patchId);
+  await fs.mkdir(backupDir, { recursive: true });
+
+  for (const file of files) {
+    const srcPath = path.join(cwd, file);
+    const destPath = path.join(backupDir, file);
+
+    try {
+      // Create directory structure
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      // Copy file
+      await fs.copyFile(srcPath, destPath);
+    } catch {
+      // File might not exist (new file), continue
+    }
+  }
+
+  return { backupDir };
+}
+
+/**
+ * Restore files from backup.
+ */
+export async function restoreFromBackup(
+  patchId: string,
+  workspaceDir?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const cwd = workspaceDir ?? process.cwd();
+  const backupDir = path.join(PATCHES_DIR, "backups", patchId);
+
+  try {
+    const files = await fs.readdir(backupDir, { recursive: true, withFileTypes: false });
+
+    for (const file of files) {
+      const fileStr = String(file);
+      const srcPath = path.join(backupDir, fileStr);
+      const destPath = path.join(cwd, fileStr);
+
+      try {
+        const stat = await fs.stat(srcPath);
+        if (stat.isFile()) {
+          await fs.mkdir(path.dirname(destPath), { recursive: true });
+          await fs.copyFile(srcPath, destPath);
+        }
+      } catch {
+        // Skip files that can't be stat'd
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }

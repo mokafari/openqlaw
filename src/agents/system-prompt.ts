@@ -719,12 +719,15 @@ export async function buildAgentSystemPrompt(params: {
     );
   }
 
-  // Add self-modification/evolution instructions if evolution tools are available
+  // Add self-modification/evolution instructions if evolution tools or rebuild_gateway are available
   const hasEvolutionTools =
     params.toolNames?.some((name) =>
-      ["evolution_propose_patch", "evolution_run_dojo_test", "evolution_list_patches"].includes(
-        name.toLowerCase(),
-      ),
+      [
+        "evolution_propose_patch",
+        "evolution_run_dojo_test",
+        "evolution_list_patches",
+        "rebuild_gateway",
+      ].includes(name.toLowerCase()),
     ) ?? false;
 
   if (hasEvolutionTools) {
@@ -736,23 +739,40 @@ export async function buildAgentSystemPrompt(params: {
       "- Use evolution_propose_patch to generate code patches for identified issues or improvements",
       "- Use evolution_run_dojo_test to validate changes against the Dojo evaluation suite",
       "- Use evolution_list_patches to view pending and applied patches",
+      "- Use rebuild_gateway to rebuild and restart the gateway after making code changes",
+      "",
+      "**Self-Patching Workflow (Full Cycle):**",
+      "You can now perform complete self-patching cycles:",
+      "  1. **Detect**: Identify issues through errors, telemetry, or user feedback",
+      "  2. **Edit**: Use read/write/edit/apply_patch tools to modify source files",
+      "  3. **Build**: Run `pnpm build` or use rebuild_gateway to compile changes",
+      "  4. **Restart**: Use rebuild_gateway or gateway tool to restart the gateway",
+      "  5. **Survive**: The system maintains session state across restarts",
       "",
       "**When to Use Self-Modification:**",
       "- Fix identified bugs or performance issues in your own code",
       "- Optimize functions to reduce token usage or improve efficiency",
       "- Add new capabilities based on telemetry and user feedback",
       "- Always validate changes with Dojo tests before applying",
+      "- After making code changes, rebuild and restart to apply them",
       "",
       "**Automatic Recovery System:**",
       "- The system includes automatic recovery for build failures and system errors",
       "- When build failures occur, the recovery system:",
-      "  1. Parses errors from build logs",
-      "  2. Spawns diagnostic agents to analyze root causes",
-      "  3. Attempts automatic fixes with retries and backups",
-      "  4. Validates fixes using the Dojo test suite",
-      "  5. Alerts you if recovery fails after maximum attempts",
+      "  1. Parses errors from build logs (TypeScript, compilation errors)",
+      "  2. Classifies errors and determines recovery strategy",
+      "  3. Spawns diagnostic agents to analyze root causes",
+      "  4. Attempts automatic fixes with retries and backups",
+      "  5. Validates fixes by rebuilding and verifying the build succeeds",
+      "  6. Alerts you if recovery fails after maximum attempts",
       "- Recovery state is persisted and can resume after restarts",
       "- Recovery integrates with the evolution system for continuous improvement",
+      "- The watch script (gateway:watch) monitors builds and triggers recovery automatically",
+      "",
+      "**Health Monitoring:**",
+      "- The system runs hourly health checks on the gateway",
+      "- If the gateway is unhealthy, a diagnostic agent is automatically spawned",
+      "- Health checks verify gateway reachability and target connectivity",
       "",
       "**Evolution & Recovery Workflow:**",
       "- Telemetry tracks tool error rates and identifies hotspots",
@@ -760,12 +780,14 @@ export async function buildAgentSystemPrompt(params: {
       "- Patches are validated through policy guards and Dojo tests",
       "- Successful patches improve system performance over time",
       "- Recovery attempts are logged for learning and refinement",
+      "- Build failures are automatically detected and recovery is attempted",
       "",
       "**Safety:**",
       "- Self-modification is gated by policy guardrails",
       "- Critical safety files are protected from modification",
       "- All changes are validated in the Dojo harness before application",
       "- Recovery has maximum retry limits to prevent infinite loops",
+      "- Backups are created before recovery attempts for rollback capability",
       "",
     );
   }

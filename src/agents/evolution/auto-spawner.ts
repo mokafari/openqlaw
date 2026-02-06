@@ -5,87 +5,115 @@ export type SpawnCodingAgentParams = {
   error: ParsedError;
   logs: string;
   workspaceDir: string;
-  strategy: "claude-code" | "codex" | "opencode" | "pi";
+  strategy: "claude-code" | "codex" | "opencode" | "pi" | "sessions-spawn";
 };
 
 export type SpawnResult = {
   sessionId: string;
   command: string;
+  task?: string;
+  method: "shell" | "sessions-spawn";
 };
 
 /**
- * AutoSpawner: Spawn coding agents (claude-code/codex) with error context.
+ * AutoSpawner: Spawn coding agents to fix build errors.
+ *
+ * Supports two methods:
+ * 1. sessions-spawn (preferred) - Uses OpenClaw's native sub-agent system
+ * 2. shell commands - Falls back to CLI tools like codex, claude-code
  */
 export class AutoSpawner {
   /**
    * Spawn a coding agent to fix the error.
    */
   async spawnCodingAgent(params: SpawnCodingAgentParams): Promise<SpawnResult> {
-    const prompt = this.buildRecoveryPrompt(params.error, params.logs);
-    const command = this.buildCommand(params.strategy, prompt, params.workspaceDir);
-
-    // Return command and sessionId - actual execution happens via bash tool
     const sessionId = `recovery-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const task = this.buildRecoveryTask(params.error, params.logs, params.workspaceDir);
 
+    // Prefer sessions-spawn for native integration
+    if (params.strategy === "sessions-spawn" || params.strategy === "pi") {
+      return {
+        sessionId,
+        command: "", // Not used for sessions-spawn
+        task,
+        method: "sessions-spawn",
+      };
+    }
+
+    // Fall back to shell command for external CLIs
+    const command = this.buildShellCommand(params.strategy, task, params.workspaceDir);
     return {
       sessionId,
       command,
+      task,
+      method: "shell",
     };
   }
 
   /**
-   * Build recovery prompt for coding agent.
+   * Build recovery task description for coding agent.
    */
-  private buildRecoveryPrompt(error: ParsedError, logs: string): string {
+  buildRecoveryTask(error: ParsedError, logs: string, workspaceDir: string): string {
     const lastLogs = logs.split("\n").slice(-50).join("\n");
 
     return `
-Build failed with error:
+# Build Recovery Task
 
-File: ${error.file}:${error.line}:${error.column}
-Error: ${error.message}
-Code: ${error.code}
+## Error Details
+- **File:** ${error.file}:${error.line}:${error.column}
+- **Error Code:** ${error.code}
+- **Message:** ${error.message}
 
-Context:
+## Code Context
 \`\`\`typescript
 ${error.context}
 \`\`\`
 
-Full build log (last 50 lines):
+## Build Log (last 50 lines)
 \`\`\`
 ${lastLogs}
 \`\`\`
 
-TASK: Fix this error. Then verify the build succeeds by running: pnpm exec tsdown
+## Instructions
 
-When done, run:
-openclaw system event --text "Build fixed: ${error.code}" --mode now
+1. **Analyze** the error and understand the root cause
+2. **Fix** the issue in ${error.file}
+3. **Verify** by running: \`cd ${workspaceDir} && pnpm build\`
+4. **Report** success or failure
+
+## Constraints
+- Only modify files necessary to fix this specific error
+- Do not introduce new dependencies unless absolutely necessary
+- Ensure the fix doesn't break other functionality
+
+## On Success
+The build should complete without errors. Report what was changed.
+
+## On Failure
+If you cannot fix the error after 3 attempts, report the issue and suggest manual intervention.
     `.trim();
   }
 
   /**
-   * Build command to spawn coding agent.
+   * Build shell command for external coding agent CLIs.
    */
-  private buildCommand(
-    strategy: SpawnCodingAgentParams["strategy"],
-    prompt: string,
+  private buildShellCommand(
+    strategy: Exclude<SpawnCodingAgentParams["strategy"], "sessions-spawn" | "pi">,
+    task: string,
     workspaceDir: string,
   ): string {
-    // Escape prompt for shell
-    const escapedPrompt = prompt.replace(/'/g, "'\\''");
+    // Escape task for shell
+    const escapedTask = task.replace(/'/g, "'\\''").replace(/\n/g, "\\n");
 
     switch (strategy) {
       case "codex":
-        return `cd ${workspaceDir} && codex exec --full-auto '${escapedPrompt}'`;
+        return `cd ${workspaceDir} && codex -a '${escapedTask}'`;
 
       case "claude-code":
-        return `cd ${workspaceDir} && claude-code exec '${escapedPrompt}'`;
+        return `cd ${workspaceDir} && claude -p '${escapedTask}'`;
 
       case "opencode":
-        return `cd ${workspaceDir} && opencode run '${escapedPrompt}'`;
-
-      case "pi":
-        return `cd ${workspaceDir} && pi '${escapedPrompt}'`;
+        return `cd ${workspaceDir} && opencode '${escapedTask}'`;
 
       default:
         throw new Error(`Unknown coding agent strategy: ${strategy}`);
@@ -93,11 +121,35 @@ openclaw system event --text "Build fixed: ${error.code}" --mode now
   }
 
   /**
-   * Monitor agent progress (returns sessionId for process tool monitoring).
+   * Get sessions_spawn parameters for native sub-agent execution.
    */
-  getSessionId(command: string): string {
-    // Extract sessionId from command or generate one
-    // In practice, the bash tool will return a sessionId
-    return `recovery-${Date.now()}`;
+  getSessionsSpawnParams(
+    task: string,
+    options?: {
+      label?: string;
+      timeoutSeconds?: number;
+      model?: string;
+    },
+  ): {
+    task: string;
+    label: string;
+    runTimeoutSeconds: number;
+    model?: string;
+    cleanup: "delete" | "keep";
+  } {
+    return {
+      task,
+      label: options?.label ?? `recovery-${Date.now()}`,
+      runTimeoutSeconds: options?.timeoutSeconds ?? 300, // 5 minute default
+      model: options?.model,
+      cleanup: "keep", // Keep session for debugging
+    };
+  }
+
+  /**
+   * Generate session ID for tracking.
+   */
+  generateSessionId(): string {
+    return `recovery-${Date.now()}-${randomUUID().slice(0, 8)}`;
   }
 }
