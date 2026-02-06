@@ -43,7 +43,7 @@ describe("RecoveryLoop", () => {
       expect(result.success).toBe(false);
       expect(result.attempts).toBe(0);
       expect(result.escalate).toBe(true);
-      expect(result.error).toContain("not fixable");
+      expect(result.error).toContain("intervention");
     });
 
     it("should attempt recovery for fixable errors", async () => {
