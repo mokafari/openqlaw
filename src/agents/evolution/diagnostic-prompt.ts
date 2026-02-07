@@ -8,6 +8,7 @@ export function buildDiagnosticAgentPrompt(params: {
   failingSessions: Array<{ sessionId: string; error: string; timestamp: number }>;
   sourceFile?: string;
   workspaceDir?: string;
+  gitContext?: string;
 }): string {
   const lines: string[] = [];
 
@@ -34,6 +35,18 @@ export function buildDiagnosticAgentPrompt(params: {
       `**IMPORTANT**: Read this source file using the \`read\` tool. Do NOT guess or invent file paths.`,
     );
     lines.push(`The file path is relative to the repository root at \`/Users/gustav/openclaw/\`.`);
+    lines.push("");
+  }
+
+  if (params.gitContext) {
+    lines.push("");
+    lines.push(`### Git Context`);
+    lines.push("");
+    lines.push(params.gitContext);
+    lines.push("");
+    lines.push(
+      `Use this context to understand who wrote the error-prone code and when it was last modified.`,
+    );
     lines.push("");
   }
 

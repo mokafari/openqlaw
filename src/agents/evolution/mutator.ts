@@ -5,6 +5,7 @@ import { log } from "../pi-embedded-runner/logger.js";
 import { buildDiagnosticAgentPrompt } from "./diagnostic-prompt.js";
 import { runDojoTask, type DojoTask } from "./dojo.js";
 import { loadGenotype } from "./genotype.js";
+import { createGitTools, type ChangeAttribution, type BlameEntry } from "./git-tools.js";
 import {
   savePatch,
   updatePatchStatus,
@@ -29,6 +30,20 @@ export type ToolHotspot = {
   errorRate: number;
   totalCalls: number;
   errorCount: number;
+};
+
+export type FileHotspot = {
+  filePath: string;
+  recentCommits: number;
+  totalChurn: number; // insertions + deletions
+  authors: string[];
+  lastModified: Date;
+};
+
+export type GitContext = {
+  attribution?: ChangeAttribution;
+  blameForErrorLines?: BlameEntry[];
+  recentCommits?: Array<{ hash: string; author: string; message: string; date: Date }>;
 };
 
 export type DiagnosticResult = {
@@ -153,6 +168,146 @@ export class Mutator {
   }
 
   /**
+   * Identify file hotspots based on git churn (high change frequency).
+   * Files with many recent changes are more likely to have issues.
+   */
+  async identifyFileHotspots(params?: {
+    limit?: number;
+    sinceDays?: number;
+  }): Promise<FileHotspot[]> {
+    const repoPath = this.workspaceDir ?? process.cwd();
+    const git = createGitTools(repoPath);
+    const hotspots: FileHotspot[] = [];
+
+    try {
+      // Get recent commits
+      const commits = await git.getRecentCommits(undefined, params?.limit ?? 50);
+
+      // Count changes per file
+      const fileStats = new Map<
+        string,
+        { commits: number; churn: number; authors: Set<string>; lastModified: Date }
+      >();
+
+      for (const commit of commits) {
+        const commitInfo = await git.getCommit(commit.hash);
+        for (const file of commitInfo.files) {
+          const existing = fileStats.get(file) ?? {
+            commits: 0,
+            churn: 0,
+            authors: new Set<string>(),
+            lastModified: new Date(0),
+          };
+          existing.commits++;
+          existing.churn += commitInfo.insertions + commitInfo.deletions;
+          existing.authors.add(commitInfo.author);
+          if (commitInfo.date > existing.lastModified) {
+            existing.lastModified = commitInfo.date;
+          }
+          fileStats.set(file, existing);
+        }
+      }
+
+      // Convert to hotspots, sorted by commit frequency
+      for (const [filePath, stats] of fileStats.entries()) {
+        // Only include TypeScript files in src/
+        if (!filePath.startsWith("src/") || !filePath.endsWith(".ts")) continue;
+        hotspots.push({
+          filePath,
+          recentCommits: stats.commits,
+          totalChurn: stats.churn,
+          authors: Array.from(stats.authors),
+          lastModified: stats.lastModified,
+        });
+      }
+
+      // Sort by commit frequency (most changed first)
+      hotspots.sort((a, b) => b.recentCommits - a.recentCommits);
+
+      return hotspots.slice(0, params?.limit ?? 20);
+    } catch (err) {
+      log.warn(`[mutator] Failed to identify file hotspots: ${err}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get git context for a source file (blame, attribution, recent commits).
+   * Used to provide context to diagnostic agents about who wrote problematic code.
+   */
+  async getGitContext(
+    filePath: string,
+    options?: { startLine?: number; endLine?: number },
+  ): Promise<GitContext> {
+    const repoPath = this.workspaceDir ?? process.cwd();
+    const git = createGitTools(repoPath);
+    const context: GitContext = {};
+
+    try {
+      // Get change attribution (who owns which lines)
+      context.attribution = await git.getChangeAttribution(filePath);
+
+      // Get blame for specific error lines if provided
+      if (options?.startLine && options?.endLine) {
+        context.blameForErrorLines = await git.blame(filePath, {
+          startLine: options.startLine,
+          endLine: options.endLine,
+        });
+      }
+
+      // Get recent commits for this file
+      const commits = await git.getRecentCommits(filePath, 5);
+      context.recentCommits = commits.map((c) => ({
+        hash: c.shortHash,
+        author: c.author,
+        message: c.message,
+        date: c.date,
+      }));
+    } catch (err) {
+      log.warn(`[mutator] Failed to get git context for ${filePath}: ${err}`);
+    }
+
+    return context;
+  }
+
+  /**
+   * Format git context as a string for inclusion in diagnostic prompts.
+   */
+  formatGitContextForPrompt(context: GitContext): string {
+    const parts: string[] = [];
+
+    if (context.attribution) {
+      const topAuthors = context.attribution.authors.slice(0, 3);
+      if (topAuthors.length > 0) {
+        parts.push("## File Ownership");
+        for (const author of topAuthors) {
+          parts.push(
+            `- ${author.author}: ${author.lines} lines (${author.percentage.toFixed(1)}%)`,
+          );
+        }
+      }
+    }
+
+    if (context.recentCommits && context.recentCommits.length > 0) {
+      parts.push("\n## Recent Changes");
+      for (const commit of context.recentCommits) {
+        parts.push(`- ${commit.hash} (${commit.author}): ${commit.message}`);
+      }
+    }
+
+    if (context.blameForErrorLines && context.blameForErrorLines.length > 0) {
+      parts.push("\n## Error Line Authors");
+      const uniqueAuthors = new Set(context.blameForErrorLines.map((b) => b.author));
+      for (const author of uniqueAuthors) {
+        const lines = context.blameForErrorLines.filter((b) => b.author === author);
+        parts.push(`- ${author}: wrote ${lines.length} of the error-prone lines`);
+      }
+    }
+
+    return parts.join("\n");
+  }
+
+  /**
    * Check if a tool has already been fixed by an applied patch.
    * Returns information about the most recent patch if found.
    */
@@ -234,7 +389,14 @@ export class Mutator {
     // Map tool name to source file (simplified - would need a proper mapping)
     const sourceFile = this.mapToolToSourceFile(hotspot.toolName);
 
-    // Build diagnostic prompt
+    // Get git context for the source file (blame, attribution)
+    let gitContextStr = "";
+    if (sourceFile) {
+      const gitContext = await this.getGitContext(sourceFile);
+      gitContextStr = this.formatGitContextForPrompt(gitContext);
+    }
+
+    // Build diagnostic prompt with git context
     const prompt = buildDiagnosticAgentPrompt({
       toolName: hotspot.toolName,
       errorRate: hotspot.errorRate,
@@ -245,6 +407,7 @@ export class Mutator {
       })),
       sourceFile,
       workspaceDir: this.workspaceDir,
+      gitContext: gitContextStr,
     });
 
     // Spawn sub-agent via gateway and wait for completion

@@ -4,7 +4,8 @@ import path from "node:path";
 import { callGateway } from "../../gateway/call.js";
 import { log } from "../pi-embedded-runner/logger.js";
 import { runEvolutionDojoTask } from "./dojo-runner.ts";
-import { Mutator } from "./mutator.js";
+import { createGitTools } from "./git-tools.js";
+import { Mutator, type FileHotspot } from "./mutator.js";
 import { applyPatchToCodebase, savePatch, updatePatchStatus } from "./patches.js";
 import { validatePatch } from "./policy-guard.js";
 
@@ -44,7 +45,16 @@ export class MutationWorkflow {
       }
     }
 
-    // 2. Identify hotspots (reflexive)
+    // 2. Identify file hotspots (git churn analysis)
+    const fileHotspots = await this.mutator.identifyFileHotspots({ limit: 10 });
+    if (fileHotspots.length > 0) {
+      log.info(`[mutation] Git analysis: ${fileHotspots.length} file(s) with high churn:`);
+      for (const fh of fileHotspots.slice(0, 5)) {
+        log.info(`  - ${fh.filePath}: ${fh.recentCommits} commits, ${fh.totalChurn} lines changed`);
+      }
+    }
+
+    // 3. Identify tool hotspots (reflexive)
     // Use higher threshold to focus on severe issues first
     const hotspots = await this.mutator.identifyHotspots({ threshold: 0.25, minCalls: 10 });
     if (hotspots.length === 0) {
