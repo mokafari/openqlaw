@@ -24,7 +24,16 @@ export function buildDiagnosticAgentPrompt(params: {
   lines.push("");
 
   if (params.sourceFile) {
-    lines.push(`- **Source File**: ${params.sourceFile}`);
+    lines.push("");
+    lines.push(`### Source File (REQUIRED)`);
+    lines.push(`\`\`\``);
+    lines.push(params.sourceFile);
+    lines.push(`\`\`\``);
+    lines.push("");
+    lines.push(
+      `**IMPORTANT**: Read this source file using the \`read\` tool. Do NOT guess or invent file paths.`,
+    );
+    lines.push(`The file path is relative to the repository root at \`/Users/gustav/openclaw/\`.`);
     lines.push("");
   }
 
@@ -40,7 +49,11 @@ export function buildDiagnosticAgentPrompt(params: {
   lines.push("");
   lines.push("## Available Tools");
   lines.push("");
-  lines.push("- `read`: Read the source file(s) for the tool");
+  if (params.sourceFile) {
+    lines.push(`- \`read\`: Read the source file: \`${params.sourceFile}\``);
+  } else {
+    lines.push("- `read`: Read the source file(s) for the tool");
+  }
   lines.push("- `grep`: Search for related code patterns");
   lines.push("- `sessions_history`: Review session logs for more context");
   lines.push("- `apply_patch`: Propose your fix as a patch");
