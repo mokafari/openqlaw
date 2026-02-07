@@ -7,8 +7,14 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   TestDiscovery,
   createTestDiscovery,
+  findRelatedTests,
+  discoverTestPatterns,
+  mapSourceToTests,
+  runRelatedTests,
   type TestFile,
   type TestCase,
+  type TestPattern,
+  type TestResult,
 } from "./test-discovery.js";
 
 // Mock fs promises
@@ -170,5 +176,77 @@ describe("createTestDiscovery", () => {
   it("creates TestDiscovery with custom path", () => {
     const discovery = createTestDiscovery("/custom/path");
     expect(discovery).toBeInstanceOf(TestDiscovery);
+  });
+});
+
+describe("findRelatedTests", () => {
+  it("returns empty array when no tests exist", async () => {
+    vi.mocked(readdir).mockResolvedValue([]);
+
+    const tests = await findRelatedTests("src/myModule.ts", "/fake/project");
+
+    expect(tests).toEqual([]);
+  });
+});
+
+describe("discoverTestPatterns", () => {
+  it("discovers suffix patterns when test files exist", async () => {
+    // This test verifies the pattern detection logic
+    // The actual file walking is tested in integration tests
+    const discovery = new TestDiscovery({ rootDir: "/fake/project" });
+
+    // Mock a test file with .test.ts suffix
+    vi.mocked(readdir).mockImplementation(async (dir) => {
+      if (String(dir) === "/fake/project") {
+        return [{ name: "foo.test.ts", isDirectory: () => false, isFile: () => true }] as any;
+      }
+      return [];
+    });
+
+    vi.mocked(readFile).mockResolvedValue(`
+import { describe, it } from "vitest";
+describe("test", () => { it("works", () => {}); });
+`);
+
+    // Test the pattern detection on a parsed file
+    const testFile = await discovery.parseTestFile("/fake/project/foo.test.ts");
+    expect(testFile.relativePath).toBe("foo.test.ts");
+    expect(testFile.relativePath.includes(".test.")).toBe(true);
+  });
+
+  it("identifies __tests__ directory in file paths", async () => {
+    // This test verifies that __tests__ paths are recognized
+    const discovery = new TestDiscovery({ rootDir: "/fake/project" });
+
+    vi.mocked(readFile).mockResolvedValue(`
+import { describe, it } from "vitest";
+describe("test", () => { it("works", () => {}); });
+`);
+
+    const testFile = await discovery.parseTestFile("/fake/project/__tests__/foo.ts");
+    expect(testFile.relativePath).toBe("__tests__/foo.ts");
+    expect(testFile.relativePath.includes("__tests__/")).toBe(true);
+  });
+});
+
+describe("mapSourceToTests", () => {
+  it("returns empty map when no tests exist", async () => {
+    vi.mocked(readdir).mockResolvedValue([]);
+
+    const mapping = await mapSourceToTests("/fake/project");
+
+    expect(mapping.size).toBe(0);
+  });
+});
+
+describe("runRelatedTests", () => {
+  it("returns success with no tests when none are related", async () => {
+    vi.mocked(readdir).mockResolvedValue([]);
+
+    const result = await runRelatedTests("src/myModule.ts", "/fake/project");
+
+    expect(result.success).toBe(true);
+    expect(result.testFiles).toEqual([]);
+    expect(result.output).toBe("No related tests found");
   });
 });

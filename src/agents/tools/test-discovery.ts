@@ -485,3 +485,183 @@ export function createTestDiscovery(rootDir?: string): TestDiscovery {
     sourceDir: "src",
   });
 }
+
+// ============================================================================
+// Standalone Helper Functions
+// ============================================================================
+
+/**
+ * Test pattern discovered in a directory.
+ */
+export type TestPattern = {
+  pattern: string;
+  type: "suffix" | "directory" | "prefix";
+  count: number;
+  examples: string[];
+};
+
+/**
+ * Result from running tests.
+ */
+export type TestResult = {
+  success: boolean;
+  testFiles: string[];
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration: number;
+  output: string;
+  error?: string;
+};
+
+/**
+ * Find test files related to a given source file.
+ * Looks for *.test.ts, *.spec.ts, and __tests__/ patterns.
+ */
+export async function findRelatedTests(sourceFile: string, rootDir?: string): Promise<string[]> {
+  const discovery = createTestDiscovery(rootDir);
+  const affected = await discovery.findAffectedTests([sourceFile]);
+  return [...affected.directlyAffected, ...affected.indirectlyAffected].map((t) => t.path);
+}
+
+/**
+ * Discover test patterns used in a directory.
+ * Returns patterns like *.test.ts, *.spec.ts, __tests__/, etc.
+ */
+export async function discoverTestPatterns(dir: string): Promise<TestPattern[]> {
+  const patterns: Map<string, { type: TestPattern["type"]; files: string[] }> = new Map();
+
+  const discovery = new TestDiscovery({ rootDir: dir });
+  const testFiles = await discovery.findTestFiles();
+
+  for (const testFile of testFiles) {
+    const relativePath = testFile.relativePath;
+
+    // Check for suffix patterns
+    if (relativePath.includes(".test.")) {
+      const key = "*.test.*";
+      if (!patterns.has(key)) {
+        patterns.set(key, { type: "suffix", files: [] });
+      }
+      patterns.get(key)!.files.push(relativePath);
+    } else if (relativePath.includes(".spec.")) {
+      const key = "*.spec.*";
+      if (!patterns.has(key)) {
+        patterns.set(key, { type: "suffix", files: [] });
+      }
+      patterns.get(key)!.files.push(relativePath);
+    }
+
+    // Check for __tests__ directory pattern
+    if (relativePath.includes("__tests__/")) {
+      const key = "__tests__/";
+      if (!patterns.has(key)) {
+        patterns.set(key, { type: "directory", files: [] });
+      }
+      patterns.get(key)!.files.push(relativePath);
+    }
+
+    // Check for test/ or tests/ directory pattern
+    if (relativePath.match(/^tests?\//)) {
+      const key = "test(s)/";
+      if (!patterns.has(key)) {
+        patterns.set(key, { type: "directory", files: [] });
+      }
+      patterns.get(key)!.files.push(relativePath);
+    }
+  }
+
+  return Array.from(patterns.entries()).map(([pattern, data]) => ({
+    pattern,
+    type: data.type,
+    count: data.files.length,
+    examples: data.files.slice(0, 5),
+  }));
+}
+
+/**
+ * Map source files to their corresponding test files.
+ * Returns a Map where keys are source files and values are arrays of test files.
+ */
+export async function mapSourceToTests(sourceDir: string): Promise<Map<string, string[]>> {
+  const mapping = new Map<string, string[]>();
+  const discovery = new TestDiscovery({ rootDir: sourceDir, sourceDir: "src" });
+  const testFiles = await discovery.findTestFiles();
+
+  for (const testFile of testFiles) {
+    if (testFile.sourceFile) {
+      const existing = mapping.get(testFile.sourceFile) ?? [];
+      existing.push(testFile.path);
+      mapping.set(testFile.sourceFile, existing);
+    }
+  }
+
+  return mapping;
+}
+
+/**
+ * Run tests related to a source file change.
+ * Uses pnpm test by default (vitest).
+ */
+export async function runRelatedTests(sourceFile: string, rootDir?: string): Promise<TestResult> {
+  const root = rootDir ?? process.cwd();
+  const relatedTests = await findRelatedTests(sourceFile, root);
+
+  if (relatedTests.length === 0) {
+    return {
+      success: true,
+      testFiles: [],
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      duration: 0,
+      output: "No related tests found",
+    };
+  }
+
+  const testPaths = relatedTests.map((t) => relative(root, t)).join(" ");
+  const startTime = Date.now();
+
+  try {
+    const output = execSync(`pnpm test -- --run ${testPaths}`, {
+      cwd: root,
+      encoding: "utf-8",
+      timeout: 300000, // 5 minute timeout
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    // Parse vitest output for stats
+    const passedMatch = output.match(/(\d+)\s+passed/);
+    const failedMatch = output.match(/(\d+)\s+failed/);
+    const skippedMatch = output.match(/(\d+)\s+skipped/);
+
+    return {
+      success: true,
+      testFiles: relatedTests,
+      passed: passedMatch ? parseInt(passedMatch[1], 10) : 0,
+      failed: failedMatch ? parseInt(failedMatch[1], 10) : 0,
+      skipped: skippedMatch ? parseInt(skippedMatch[1], 10) : 0,
+      duration: Date.now() - startTime,
+      output,
+    };
+  } catch (err: unknown) {
+    const error = err as { stdout?: string; stderr?: string; message?: string };
+    const output = (error.stdout ?? "") + (error.stderr ?? "");
+
+    // Parse output even on failure
+    const passedMatch = output.match(/(\d+)\s+passed/);
+    const failedMatch = output.match(/(\d+)\s+failed/);
+    const skippedMatch = output.match(/(\d+)\s+skipped/);
+
+    return {
+      success: false,
+      testFiles: relatedTests,
+      passed: passedMatch ? parseInt(passedMatch[1], 10) : 0,
+      failed: failedMatch ? parseInt(failedMatch[1], 10) : 1,
+      skipped: skippedMatch ? parseInt(skippedMatch[1], 10) : 0,
+      duration: Date.now() - startTime,
+      output,
+      error: error.message,
+    };
+  }
+}
