@@ -67,6 +67,13 @@ export class FSMStateManager {
     }
   }
 
+  /**
+   * Get the state file path (for debugging/logging)
+   */
+  getStateFilePath(): string | undefined {
+    return this.stateFile;
+  }
+
   /** Update the reachability context (e.g. when workspace changes). */
   setReachabilityContext(ctx: ReachabilityCheckContext): void {
     this.reachabilityContext = ctx;
@@ -195,12 +202,19 @@ export class FSMStateManager {
         this.enteredAt = record.enteredAt ?? Date.now();
         this.previousState = record.previousState;
         this.metadata = record.metadata ?? {};
+        console.log(
+          `[FSM] Loaded state from ${this.stateFile}: ${this.currentState} (entered at ${new Date(this.enteredAt).toISOString()})`,
+        );
         return true;
+      } else {
+        console.warn(`[FSM] Invalid state in ${this.stateFile}: ${JSON.stringify(record)}`);
       }
     } catch (error) {
       // File doesn't exist or invalid - start fresh
       if ((error as { code?: string }).code !== "ENOENT") {
-        console.warn(`Failed to load FSM state: ${String(error)}`);
+        console.warn(`[FSM] Failed to load state from ${this.stateFile}: ${String(error)}`);
+      } else {
+        console.log(`[FSM] No state file found at ${this.stateFile}, starting fresh`);
       }
     }
 

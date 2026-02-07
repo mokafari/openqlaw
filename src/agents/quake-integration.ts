@@ -55,7 +55,14 @@ export async function initializeQuakeIntegration(params: {
     sessionId,
     sessionDir,
   });
-  await fsmManager.load(); // Try to load persisted state
+  const stateLoaded = await fsmManager.load(); // Try to load persisted state
+  if (stateLoaded) {
+    console.log(
+      `[quake-integration] Restored FSM state: ${fsmManager.getState()} (from ${fsmManager.getStateFilePath()})`,
+    );
+  } else {
+    console.log(`[quake-integration] Starting with fresh FSM state (no persisted state found)`);
+  }
 
   // Initialize Goal Stack (use existing session-based system)
   let goalStack: GoalStack;
