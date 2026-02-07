@@ -59,9 +59,12 @@ export async function onTimer(state: CronServiceState) {
 
 export async function runDueJobs(state: CronServiceState) {
   if (!state.store) {
+    console.error("[CRON-DEBUG] runDueJobs: no store!");
     return;
   }
   const now = state.deps.nowMs();
+
+  console.error("[CRON-DEBUG] runDueJobs called - now:", now, "jobs:", state.store.jobs.length);
 
   // Debug: Log when checking for due jobs
   state.deps.log.info(
