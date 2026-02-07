@@ -45,7 +45,8 @@ export class MutationWorkflow {
     }
 
     // 2. Identify hotspots (reflexive)
-    const hotspots = await this.mutator.identifyHotspots({ threshold: 0.15 }); // Be eager
+    // Use higher threshold to focus on severe issues first
+    const hotspots = await this.mutator.identifyHotspots({ threshold: 0.25, minCalls: 10 });
     if (hotspots.length === 0) {
       log.info("[mutation] No tool hotspots identified.");
       return results;
@@ -55,10 +56,19 @@ export class MutationWorkflow {
     const { getDiagnosticThrottler } = await import("./diagnostic-throttler.js");
     const throttler = getDiagnosticThrottler();
 
+    // Prioritize hotspots by impact: error rate * call volume
+    // High error rate on rarely-used tool = low priority
+    // Medium error rate on frequently-used tool = high priority
+    const prioritizedHotspots = hotspots
+      .map((h) => ({ ...h, impact: h.errorRate * Math.log10(h.totalCalls + 1) }))
+      .sort((a, b) => b.impact - a.impact);
+
+    log.info(`[mutation] Prioritized ${prioritizedHotspots.length} hotspot(s) by impact score`);
+
     // Process hotspots one at a time (respecting concurrent limit)
-    for (const hotspot of hotspots) {
+    for (const hotspot of prioritizedHotspots) {
       log.info(
-        `[mutation] Diagnosing hotspot: ${hotspot.toolName} (error rate: ${(hotspot.errorRate * 100).toFixed(1)}%)`,
+        `[mutation] Diagnosing hotspot: ${hotspot.toolName} (error rate: ${(hotspot.errorRate * 100).toFixed(1)}%, impact: ${hotspot.impact.toFixed(2)})`,
       );
 
       // Check if we can spawn before processing

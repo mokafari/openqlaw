@@ -227,6 +227,16 @@ export async function getAggregatedStats(params?: {
 }
 
 /**
+ * Error patterns that are expected behavior, not tool bugs.
+ * These are filtered from error rate calculations.
+ */
+const EXPECTED_ERROR_PATTERNS = [
+  /^Command exited with non-zero status/i,
+  /^ENOENT.*(?:\.env|\.git|node_modules)/i, // Expected missing files
+  /^not-due$/i, // Cron job not ready to run
+] as const;
+
+/**
  * Get tool error rates from telemetry data.
  * Returns tools with error rates above the threshold (default 20%).
  */
@@ -249,7 +259,11 @@ export async function getToolErrorRates(params?: {
       for (const [toolName, errorInfo] of Object.entries(stat.toolErrors)) {
         const existing = toolStats.get(toolName) ?? { calls: 0, errors: 0 };
         existing.calls += errorInfo.count;
-        existing.errors += errorInfo.errors.length;
+        // Filter out expected errors that aren't actual bugs
+        const actualErrors = errorInfo.errors.filter((errMsg) => {
+          return !EXPECTED_ERROR_PATTERNS.some((pattern) => pattern.test(errMsg));
+        });
+        existing.errors += actualErrors.length;
         toolStats.set(toolName, existing);
       }
     }
