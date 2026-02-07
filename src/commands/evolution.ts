@@ -1,8 +1,13 @@
+import { execSync } from "node:child_process";
 import { Breeder } from "../agents/evolution/breeder.js";
 import { runDojoSuite, DOJO_TASKS } from "../agents/evolution/dojo.js";
 import { getGlobalEvolutionDaemon } from "../agents/evolution/evolution-daemon.js";
 import { loadGenotype, saveGenotype } from "../agents/evolution/genotype.js";
-import { listPatches } from "../agents/evolution/patches.js";
+import {
+  listPatches,
+  loadPatch,
+  applyApprovedPatchToCodebase,
+} from "../agents/evolution/patches.js";
 import { getGlobalRecursiveImprover } from "../agents/evolution/recursive-improver.js";
 import { getGlobalTelemetryMonitor } from "../agents/evolution/telemetry-monitor.js";
 import { getAggregatedStats, readSessionStats } from "../agents/evolution/telemetry.js";
@@ -21,14 +26,17 @@ export async function cmdEvolution(args: {
     | "mutate"
     | "daemon"
     | "improve"
-    | "cleanup";
+    | "cleanup"
+    | "apply";
   genotypeId?: string;
   generation?: number;
+  patchId?: string;
   monitorAction?: "start" | "stop" | "check" | "status";
   daemonAction?: "start" | "stop" | "status";
   autoMutate?: boolean;
   focusAreas?: string[];
   dryRun?: boolean;
+  skipRestart?: boolean;
 }): Promise<void> {
   const deps = createDefaultDeps();
   const cfg = loadConfig();
@@ -432,6 +440,117 @@ export async function cmdEvolution(args: {
       } else {
         console.log("\nℹ️  No improvement opportunities identified");
       }
+      break;
+    }
+
+    case "apply": {
+      if (!args.patchId) {
+        console.error("Error: patchId is required for apply action");
+        process.exit(1);
+      }
+
+      console.log(`Applying approved patch ${args.patchId}...`);
+
+      const patch = await loadPatch(args.patchId);
+      if (!patch) {
+        console.error(`Error: Patch ${args.patchId} not found`);
+        process.exit(1);
+      }
+
+      // Show patch info
+      console.log(`\nPatch Info:`);
+      console.log(`  Status: ${patch.metadata.status}`);
+      console.log(`  Created: ${new Date(patch.metadata.createdAt).toISOString()}`);
+      if (patch.metadata.dojoResult) {
+        console.log(`  Dojo Result: ${patch.metadata.dojoResult.success ? "✓ Pass" : "✗ Fail"}`);
+        if (patch.metadata.dojoResult.fitness) {
+          console.log(`  Fitness: ${patch.metadata.dojoResult.fitness.toFixed(3)}`);
+        }
+      }
+      console.log(`  Rationale: ${patch.metadata.rationale.split("\n")[0]}`);
+
+      // Apply the patch
+      console.log(`\n1. Applying patch to codebase...`);
+      const workspaceDir = "/Users/gustav/openclaw";
+      const applyResult = await applyApprovedPatchToCodebase(args.patchId, workspaceDir);
+
+      if (!applyResult.success) {
+        console.error(`Error: Failed to apply patch: ${applyResult.error}`);
+        process.exit(1);
+      }
+      console.log(`   ✓ Patch applied successfully`);
+
+      // Build
+      console.log(`\n2. Building...`);
+      try {
+        const buildOutput = execSync("pnpm build 2>&1", {
+          cwd: workspaceDir,
+          encoding: "utf-8",
+          timeout: 120_000,
+        });
+        // Show last few lines of build output
+        const lines = buildOutput.split("\n").slice(-5).join("\n");
+        console.log(`   ✓ Build successful\n${lines}`);
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err.message : String(err);
+        console.error(`Error: Build failed: ${error}`);
+        process.exit(1);
+      }
+
+      // Commit
+      console.log(`\n3. Committing...`);
+      try {
+        const commitMsg = `feat(evolution): apply approved patch ${args.patchId.slice(0, 8)}
+
+${patch.metadata.rationale}
+
+Fitness: ${patch.metadata.dojoResult?.fitness?.toFixed(3) ?? "N/A"}
+Patch ID: ${args.patchId}`;
+
+        execSync(`git add -A && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
+          cwd: workspaceDir,
+          stdio: "pipe",
+          encoding: "utf-8",
+          timeout: 30_000,
+        });
+        console.log(`   ✓ Committed`);
+      } catch (err) {
+        console.warn(`   ⚠ Commit failed (continuing): ${err}`);
+      }
+
+      // Push
+      console.log(`\n4. Pushing to origin dev...`);
+      try {
+        execSync("git push origin dev", {
+          cwd: workspaceDir,
+          stdio: "pipe",
+          encoding: "utf-8",
+          timeout: 30_000,
+        });
+        console.log(`   ✓ Pushed`);
+      } catch (err) {
+        console.warn(`   ⚠ Push failed (continuing): ${err}`);
+      }
+
+      // Restart gateway if not skipped
+      if (!args.skipRestart) {
+        console.log(`\n5. Restarting gateway...`);
+        try {
+          execSync(`launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway`, {
+            cwd: workspaceDir,
+            stdio: "pipe",
+            encoding: "utf-8",
+            timeout: 10_000,
+          });
+          console.log(`   ✓ Gateway restart triggered`);
+        } catch (err) {
+          console.warn(`   ⚠ Gateway restart failed (continuing): ${err}`);
+        }
+      } else {
+        console.log(`\n5. Skipped gateway restart (--skip-restart)`);
+      }
+
+      console.log(`\n✅ Patch ${args.patchId.slice(0, 8)} successfully applied!`);
       break;
     }
 

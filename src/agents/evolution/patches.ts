@@ -229,6 +229,58 @@ export async function applyPatchToCodebase(
 }
 
 /**
+ * Apply an approved patch (already validated by Dojo) to the codebase.
+ * Works with patches in "applied" or "pending" status.
+ * Returns success even if patch.metadata.status !== "pending" (it's already approved).
+ */
+export async function applyApprovedPatchToCodebase(
+  patchId: string,
+  workspaceDir: string,
+): Promise<{ success: boolean; error?: string }> {
+  const patch = await loadPatch(patchId);
+  if (!patch) {
+    return { success: false, error: `Patch ${patchId} not found` };
+  }
+
+  // Check if patch passed Dojo validation
+  if (patch.metadata.status !== "applied" && patch.metadata.status !== "pending") {
+    return {
+      success: false,
+      error: `Patch ${patchId} has status "${patch.metadata.status}" (must be pending or applied)`,
+    };
+  }
+
+  if (!patch.metadata.dojoResult?.success) {
+    return {
+      success: false,
+      error: `Patch ${patchId} did not pass Dojo validation`,
+    };
+  }
+
+  try {
+    // Import apply_patch function
+    const { applyPatch } = await import("../../agents/apply-patch.js");
+    await applyPatch(patch.content, {
+      cwd: workspaceDir,
+    });
+
+    // Mark as applied if it was pending
+    if (patch.metadata.status === "pending") {
+      await updatePatchStatus(patchId, "applied");
+    }
+
+    return { success: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    // Don't mark as failed if it was already applied
+    if (patch.metadata.status === "pending") {
+      await updatePatchStatus(patchId, "failed", { error });
+    }
+    return { success: false, error };
+  }
+}
+
+/**
  * Revert a patch by restoring files from git or backup.
  */
 export async function revertPatch(

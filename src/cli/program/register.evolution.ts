@@ -167,6 +167,20 @@ export function registerEvolutionCommand(program: Command) {
     });
 
   evolution
+    .command("apply <patchId>")
+    .description(
+      "Apply an approved evolution patch to source files, then build, commit, push, and restart",
+    )
+    .option("--skip-restart", "Skip gateway restart after applying")
+    .action(async (patchId, opts) => {
+      await cmdEvolution({
+        action: "apply",
+        patchId,
+        skipRestart: opts.skipRestart ?? false,
+      });
+    });
+
+  evolution
     .command("cleanup")
     .description("Clean up obsolete patches and fix missing error messages")
     .option("--dry-run", "Show what would be cleaned without making changes")
