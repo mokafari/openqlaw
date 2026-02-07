@@ -2,6 +2,7 @@
  * Goal Stack Tools
  *
  * Agent tools for managing goal stacks (push, pop, status)
+ * Integrated with meta-learning for prediction/outcome tracking.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -10,8 +11,10 @@ import type { AnyAgentTool } from "./common.js";
 import { loadConfig } from "../../config/config.js";
 import { loadSessionStore, resolveStorePath, updateSessionStore } from "../../config/sessions.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import { logGoalPrediction, logGoalOutcome } from "../goals/meta-integration.js";
 import { GoalStack } from "../goals/stack.js";
 import { visualizeGoalStack, summarizeGoalStack } from "../goals/visualizer.js";
+import { log } from "../pi-embedded-runner/logger.js";
 import { jsonResult, readStringParam } from "./common.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-helpers.js";
 
@@ -22,6 +25,10 @@ const GoalPushSchema = Type.Object({
   ),
   parentId: Type.Optional(Type.String()),
   metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  // Optional prediction overrides for meta-learning
+  predictedSuccess: Type.Optional(Type.Number()),
+  predictedDurationMs: Type.Optional(Type.Number()),
+  predictedDifficulty: Type.Optional(Type.Number()),
 });
 
 const GoalPopSchema = Type.Object({
@@ -88,6 +95,11 @@ export function createGoalPushTool(opts?: { agentSessionKey?: string }): AnyAgen
       const parentId = readStringParam(params, "parentId");
       const metadata = params.metadata as Record<string, unknown> | undefined;
 
+      // Extract prediction overrides
+      const predictedSuccess = params.predictedSuccess as number | undefined;
+      const predictedDurationMs = params.predictedDurationMs as number | undefined;
+      const predictedDifficulty = params.predictedDifficulty as number | undefined;
+
       const sessionKey = opts?.agentSessionKey;
       if (!sessionKey) {
         return jsonResult({ error: "No session key available" });
@@ -109,6 +121,18 @@ export function createGoalPushTool(opts?: { agentSessionKey?: string }): AnyAgen
       stack.activate(goalId);
 
       saveGoalStack(internalKey, stack);
+
+      // Log prediction to meta-learning system (async, non-blocking)
+      const goal = stack.getById(goalId);
+      if (goal) {
+        logGoalPrediction(goal, {
+          predictedSuccess,
+          predictedDurationMs,
+          predictedDifficulty,
+        }).catch((err) => {
+          log.warn(`[goal_push] Failed to log prediction: ${err}`);
+        });
+      }
 
       return jsonResult({
         success: true,
@@ -149,6 +173,15 @@ export function createGoalPopTool(opts?: { agentSessionKey?: string }): AnyAgent
         }
         stack.complete(goalId);
         saveGoalStack(internalKey, stack);
+
+        // Log outcome to meta-learning system
+        const completedGoal = stack.getById(goalId);
+        if (completedGoal) {
+          logGoalOutcome(completedGoal).catch((err) => {
+            log.warn(`[goal_pop] Failed to log outcome: ${err}`);
+          });
+        }
+
         return jsonResult({
           success: true,
           goalId,
@@ -164,6 +197,11 @@ export function createGoalPopTool(opts?: { agentSessionKey?: string }): AnyAgent
       }
 
       saveGoalStack(internalKey, stack);
+
+      // Log outcome to meta-learning system
+      logGoalOutcome(popped).catch((err) => {
+        log.warn(`[goal_pop] Failed to log outcome: ${err}`);
+      });
 
       return jsonResult({
         success: true,
