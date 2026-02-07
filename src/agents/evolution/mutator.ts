@@ -4,7 +4,13 @@ import { callGateway } from "../../gateway/call.js";
 import { buildDiagnosticAgentPrompt } from "./diagnostic-prompt.js";
 import { runDojoTask, type DojoTask } from "./dojo.js";
 import { loadGenotype } from "./genotype.js";
-import { savePatch, updatePatchStatus, loadPatch, type PatchMetadata } from "./patches.js";
+import {
+  savePatch,
+  updatePatchStatus,
+  loadPatch,
+  type PatchMetadata,
+  getAppliedPatchesForFile,
+} from "./patches.js";
 import {
   createBackup,
   checkRegressionTests,
@@ -150,6 +156,18 @@ export class Mutator {
    * Waits for the agent to complete and extracts any patches from tool calls.
    */
   async spawnDiagnosticAgent(hotspot: ToolHotspot): Promise<DiagnosticResult> {
+    // Check if tool is already fixed before spawning
+    const alreadyFixed = await this.isToolAlreadyFixed(hotspot.toolName);
+    if (alreadyFixed.alreadyFixed) {
+      log.warn(
+        `[mutator] Skipping diagnostic for ${hotspot.toolName} - already fixed by patch ${alreadyFixed.patchId} (applied ${alreadyFixed.hoursAgo} hours ago)`,
+      );
+      return {
+        toolName: hotspot.toolName,
+        rootCause: `Tool already fixed by patch ${alreadyFixed.patchId} (applied ${alreadyFixed.hoursAgo} hours ago)`,
+      };
+    }
+
     // Check throttling before spawning
     const { getDiagnosticThrottler } = await import("./diagnostic-throttler.js");
     const throttler = getDiagnosticThrottler();
@@ -200,19 +218,38 @@ export class Mutator {
       await throttler.recordSpawn(hotspot.toolName, childSessionKey);
 
       // Step 1: Spawn the diagnostic agent
-      const spawnResult = await callGateway<{ runId: string; status: string }>({
-        method: "agent",
-        params: {
-          message: prompt,
-          sessionKey: childSessionKey,
-          idempotencyKey: `diag-${Date.now()}`,
-          deliver: false,
-          timeout: diagConfig.timeout, // Use throttler config (2 minutes default)
-          thinking: diagConfig.thinkingLevel, // Use throttler config (minimal default)
-          label: `diagnostic-${hotspot.toolName}`,
-        },
-        timeoutMs: 10_000,
-      });
+      let spawnResult: { runId: string; status: string } | undefined;
+      try {
+        spawnResult = await callGateway<{ runId: string; status: string }>({
+          method: "agent",
+          params: {
+            message: prompt,
+            sessionKey: childSessionKey,
+            idempotencyKey: `diag-${Date.now()}`,
+            deliver: false,
+            timeout: diagConfig.timeout, // Use throttler config (2 minutes default)
+            thinking: diagConfig.thinkingLevel, // Use throttler config (minimal default)
+            label: `diagnostic-${hotspot.toolName}`,
+          },
+          timeoutMs: 10_000,
+        });
+      } catch (err) {
+        // Check if this is a rate limit error
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const { isRateLimitErrorMessage } = await import("../pi-embedded-helpers/errors.js");
+        if (isRateLimitErrorMessage(errorMessage)) {
+          log.warn(
+            `[mutator] Rate limit error when spawning diagnostic agent for ${hotspot.toolName}`,
+          );
+          await throttler.recordRateLimitError(hotspot.toolName, childSessionKey);
+          return {
+            toolName: hotspot.toolName,
+            rootCause: `Rate limit error: ${errorMessage}`,
+          };
+        }
+        // Re-throw other errors
+        throw err;
+      }
 
       if (!spawnResult?.runId) {
         return {
@@ -222,38 +259,82 @@ export class Mutator {
       }
 
       // Step 2: Wait for the agent to complete
-      const waitTimeout = diagConfig.timeout * 1000; // Convert to ms
-      const waitResult = await callGateway<{
-        status: "ok" | "error" | "timeout";
-        error?: string;
-      }>({
-        method: "agent.wait",
-        params: {
-          runId: spawnResult.runId,
-          timeoutMs: waitTimeout, // Use throttler config (2 minutes default)
-        },
-        timeoutMs: waitTimeout + 10_000,
-      });
+      let waitResult: { status: "ok" | "error" | "timeout"; error?: string } | undefined;
+      try {
+        waitResult = await callGateway<{
+          status: "ok" | "error" | "timeout";
+          error?: string;
+        }>({
+          method: "agent.wait",
+          params: {
+            runId: spawnResult.runId,
+            timeoutMs: waitTimeout, // Use throttler config (2 minutes default)
+          },
+          timeoutMs: waitTimeout + 10_000,
+        });
+      } catch (err) {
+        // Handle timeout errors from callGateway itself
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const duration = Date.now() - spawnStartTime;
+        if (errorMessage.includes("timeout") || duration >= waitTimeout) {
+          log.warn(
+            `[mutator] Diagnostic agent timeout for ${hotspot.toolName} after ${duration}ms (timeout: ${waitTimeout}ms)`,
+          );
+          await throttler.recordCompletion(childSessionKey, { timedOut: true });
+          return {
+            toolName: hotspot.toolName,
+            rootCause: `Diagnostic agent timed out after ${Math.round(duration / 1000)} seconds`,
+          };
+        }
+        // Re-throw other errors
+        throw err;
+      }
 
       if (waitResult?.status === "error") {
+        const errorMessage = waitResult.error ?? "unknown error";
+        // Check if this is a rate limit error
+        const { isRateLimitErrorMessage } = await import("../pi-embedded-helpers/errors.js");
+        if (isRateLimitErrorMessage(errorMessage)) {
+          log.warn(`[mutator] Rate limit error in diagnostic agent for ${hotspot.toolName}`);
+          await throttler.recordRateLimitError(hotspot.toolName, childSessionKey);
+          return {
+            toolName: hotspot.toolName,
+            rootCause: `Rate limit error: ${errorMessage}`,
+          };
+        }
         return {
           toolName: hotspot.toolName,
-          rootCause: `Diagnostic agent failed: ${waitResult.error ?? "unknown error"}`,
+          rootCause: `Diagnostic agent failed: ${errorMessage}`,
         };
       }
 
       if (waitResult?.status === "timeout") {
+        const duration = Date.now() - spawnStartTime;
+        log.warn(
+          `[mutator] Diagnostic agent timeout for ${hotspot.toolName} after ${duration}ms (timeout: ${waitTimeout}ms)`,
+        );
+        // Record timeout
+        await throttler.recordCompletion(childSessionKey, { timedOut: true });
         return {
           toolName: hotspot.toolName,
-          rootCause: "Diagnostic agent timed out",
+          rootCause: `Diagnostic agent timed out after ${Math.round(duration / 1000)} seconds`,
         };
       }
 
       // Step 3: Read session transcript to extract patches
       const patchResult = await this.extractPatchFromSession(childSessionKey);
+      const duration = Date.now() - spawnStartTime;
 
       // Record completion
       await throttler.recordCompletion(childSessionKey);
+
+      // Log warning if agent ran close to timeout (90% threshold)
+      const timeoutThreshold = waitTimeout * 0.9;
+      if (duration > timeoutThreshold) {
+        log.warn(
+          `[mutator] Diagnostic agent for ${hotspot.toolName} ran for ${Math.round(duration / 1000)}s (${Math.round((duration / waitTimeout) * 100)}% of timeout)`,
+        );
+      }
 
       return {
         toolName: hotspot.toolName,
@@ -262,12 +343,40 @@ export class Mutator {
         patchId: patchResult.patchId,
       };
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const duration = Date.now() - spawnStartTime;
+
+      // Check if this is a rate limit error
+      const { isRateLimitErrorMessage } = await import("../pi-embedded-helpers/errors.js");
+      if (isRateLimitErrorMessage(errorMessage)) {
+        log.warn(
+          `[mutator] Rate limit error when spawning diagnostic agent for ${hotspot.toolName}`,
+        );
+        await throttler.recordRateLimitError(hotspot.toolName, childSessionKey).catch(() => {});
+        return {
+          toolName: hotspot.toolName,
+          rootCause: `Rate limit error: ${errorMessage}`,
+        };
+      }
+
+      // Check if this is a timeout error
+      if (errorMessage.includes("timeout") || duration >= waitTimeout) {
+        log.warn(
+          `[mutator] Diagnostic agent timeout for ${hotspot.toolName} after ${duration}ms (caught in catch block)`,
+        );
+        await throttler.recordCompletion(childSessionKey, { timedOut: true }).catch(() => {});
+        return {
+          toolName: hotspot.toolName,
+          rootCause: `Diagnostic agent timed out after ${Math.round(duration / 1000)} seconds`,
+        };
+      }
+
       // Record completion even on error
       await throttler.recordCompletion(childSessionKey).catch(() => {});
 
       return {
         toolName: hotspot.toolName,
-        rootCause: `Failed to spawn diagnostic agent: ${err instanceof Error ? err.message : String(err)}`,
+        rootCause: `Failed to spawn diagnostic agent: ${errorMessage}`,
       };
     }
   }

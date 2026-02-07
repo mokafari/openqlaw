@@ -19,6 +19,8 @@ export type DiagnosticThrottleConfig = {
   minDelayBetweenMs?: number;
   timeoutMs?: number;
   thinkingLevel?: "minimal" | "low" | "medium" | "high";
+  maxTimeoutsPerTool?: number;
+  timeoutCooldownHours?: number;
 };
 
 const DEFAULT_CONFIG: Required<DiagnosticThrottleConfig> = {
@@ -27,6 +29,8 @@ const DEFAULT_CONFIG: Required<DiagnosticThrottleConfig> = {
   minDelayBetweenMs: 300_000, // 5 minutes
   timeoutMs: 120_000, // 2 minutes
   thinkingLevel: "minimal",
+  maxTimeoutsPerTool: 2,
+  timeoutCooldownHours: 1,
 };
 
 type DiagnosticSpawnRecord = {
@@ -34,6 +38,8 @@ type DiagnosticSpawnRecord = {
   toolName: string;
   sessionKey: string;
   completed?: boolean;
+  rateLimitError?: boolean;
+  timedOut?: boolean;
 };
 
 export class DiagnosticThrottler {
@@ -49,10 +55,85 @@ export class DiagnosticThrottler {
   }
 
   /**
+   * Check for rate limit errors in recent history.
+   * Returns whether we should wait due to rate limiting.
+   */
+  async checkRateLimit(): Promise<{ canProceed: boolean; waitUntil?: number; reason?: string }> {
+    const history = await this.loadHistory();
+    const oneHourAgo = Date.now() - 3600_000;
+
+    // Check for recent rate limit errors
+    const recentRateLimitErrors = history.filter(
+      (r) => r.rateLimitError && r.timestamp > oneHourAgo,
+    );
+
+    if (recentRateLimitErrors.length > 0) {
+      // If we hit rate limit recently, wait 1 hour from the last error
+      const lastError = Math.max(...recentRateLimitErrors.map((r) => r.timestamp));
+      const waitUntil = lastError + 3600_000;
+      const waitMinutes = Math.ceil((waitUntil - Date.now()) / 60_000);
+
+      if (Date.now() < waitUntil) {
+        return {
+          canProceed: false,
+          waitUntil,
+          reason: `Rate limit detected in last hour, wait ${waitMinutes} minutes`,
+        };
+      }
+    }
+
+    return { canProceed: true };
+  }
+
+  /**
+   * Check if a tool has timed out too many times recently.
+   */
+  async checkTimeoutCooldown(toolName: string): Promise<{ allowed: boolean; reason?: string }> {
+    const history = await this.loadHistory();
+    const cooldownMs = this.config.timeoutCooldownHours * 3600_000;
+    const cooldownAgo = Date.now() - cooldownMs;
+
+    // Count timeouts for this tool in the cooldown window
+    const recentTimeouts = history.filter(
+      (r) => r.toolName === toolName && r.timedOut && r.timestamp > cooldownAgo,
+    );
+
+    if (recentTimeouts.length >= this.config.maxTimeoutsPerTool) {
+      const lastTimeout = Math.max(...recentTimeouts.map((r) => r.timestamp));
+      const waitUntil = lastTimeout + cooldownMs;
+      const waitMinutes = Math.ceil((waitUntil - Date.now()) / 60_000);
+
+      if (Date.now() < waitUntil) {
+        return {
+          allowed: false,
+          reason: `Tool ${toolName} timed out ${recentTimeouts.length} times, cooldown for ${waitMinutes} minutes`,
+        };
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  /**
    * Check if we can spawn a diagnostic agent for a tool.
    * Returns { allowed: true } if allowed, or { allowed: false, reason: string } if throttled.
    */
   async canSpawn(toolName: string): Promise<{ allowed: boolean; reason?: string }> {
+    // Check rate limit first
+    const rateLimitCheck = await this.checkRateLimit();
+    if (!rateLimitCheck.canProceed) {
+      return {
+        allowed: false,
+        reason: rateLimitCheck.reason ?? "Rate limit detected",
+      };
+    }
+
+    // Check timeout cooldown
+    const timeoutCheck = await this.checkTimeoutCooldown(toolName);
+    if (!timeoutCheck.allowed) {
+      return timeoutCheck;
+    }
+
     // Load spawn history
     const history = await this.loadHistory();
 
@@ -129,16 +210,49 @@ export class DiagnosticThrottler {
   /**
    * Mark a diagnostic agent as completed.
    */
-  async recordCompletion(sessionKey: string): Promise<void> {
+  async recordCompletion(sessionKey: string, options?: { timedOut?: boolean }): Promise<void> {
     const record = this.activeSpawns.get(sessionKey);
     if (record) {
       record.completed = true;
+      if (options?.timedOut) {
+        record.timedOut = true;
+      }
       const history = await this.loadHistory();
       const index = history.findIndex((r) => r.sessionKey === sessionKey);
       if (index >= 0) {
         history[index].completed = true;
+        if (options?.timedOut) {
+          history[index].timedOut = true;
+        }
         await this.saveHistory(history);
       }
+    }
+  }
+
+  /**
+   * Record a rate limit error.
+   */
+  async recordRateLimitError(toolName: string, sessionKey: string): Promise<void> {
+    const record = this.activeSpawns.get(sessionKey);
+    if (record) {
+      record.rateLimitError = true;
+    }
+    const history = await this.loadHistory();
+    const index = history.findIndex((r) => r.sessionKey === sessionKey);
+    if (index >= 0) {
+      history[index].rateLimitError = true;
+      await this.saveHistory(history);
+    } else {
+      // Create new record if not found
+      const newRecord: DiagnosticSpawnRecord = {
+        timestamp: Date.now(),
+        toolName,
+        sessionKey,
+        completed: true,
+        rateLimitError: true,
+      };
+      history.push(newRecord);
+      await this.saveHistory(history);
     }
   }
 

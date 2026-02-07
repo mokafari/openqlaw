@@ -166,6 +166,36 @@ export async function getPatchHistory(): Promise<PatchMetadata[]> {
 }
 
 /**
+ * Get applied patches for a specific file path.
+ * Returns patches that target the given file, sorted by application time (newest first).
+ */
+export async function getAppliedPatchesForFile(
+  filePath: string,
+  options?: { withinHours?: number },
+): Promise<PatchMetadata[]> {
+  const appliedPatches = await listPatches("applied");
+  const now = Date.now();
+  const withinMs = (options?.withinHours ?? 24) * 3600_000;
+
+  return appliedPatches
+    .filter((patch) => {
+      // Check if patch targets this file
+      const targetsFile = patch.files.some((f) => f.path === filePath);
+      if (!targetsFile) {
+        return false;
+      }
+
+      // Filter by time if specified
+      if (options?.withinHours && patch.appliedAt) {
+        return now - patch.appliedAt < withinMs;
+      }
+
+      return true;
+    })
+    .sort((a, b) => (b.appliedAt ?? 0) - (a.appliedAt ?? 0));
+}
+
+/**
  * Apply a patch to the codebase.
  * This is a wrapper that validates and applies the patch using the apply_patch tool.
  */
