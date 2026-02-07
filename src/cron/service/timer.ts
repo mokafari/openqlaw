@@ -54,7 +54,7 @@ export async function runDueJobs(state: CronServiceState) {
   const now = state.deps.nowMs();
 
   // Debug: Log when checking for due jobs
-  state.deps.log.debug(
+  state.deps.log.info(
     {
       now,
       jobCount: state.store.jobs.length,
@@ -75,7 +75,7 @@ export async function runDueJobs(state: CronServiceState) {
 
     // Debug: Log why jobs aren't due
     if (!isDue && typeof next === "number") {
-      state.deps.log.debug(
+      state.deps.log.info(
         { job: j.name, next, now, gap: next - now, gapMs: next - now },
         "cron: job not due yet",
       );
@@ -85,7 +85,7 @@ export async function runDueJobs(state: CronServiceState) {
   });
 
   // Debug: Log how many due jobs found
-  state.deps.log.debug(
+  state.deps.log.info(
     { dueCount: due.length, dueJobs: due.map((j) => j.name) },
     "cron: found due jobs",
   );
