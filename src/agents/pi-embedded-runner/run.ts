@@ -682,6 +682,23 @@ export async function runEmbeddedPiAgent(
           try {
             const { logAgentRunTelemetry, checkTelemetryAndTriggerDiagnostic } =
               await import("../evolution/integration.js");
+
+            // Capture final goals for satisfaction derivation
+            let finalGoals;
+            try {
+              const { initializeQuakeIntegration } = await import("../quake-integration.js");
+              const agentDir =
+                params.agentDir ?? (await import("../agent-paths.js")).resolveOpenClawAgentDir();
+              const quakeContext = await initializeQuakeIntegration({
+                sessionId: params.sessionKey ?? params.sessionId,
+                sessionDir: agentDir,
+                workspaceDir: params.workspaceDir,
+              });
+              finalGoals = quakeContext.goalStack.getAll();
+            } catch {
+              // Goal tracking is optional
+            }
+
             await logAgentRunTelemetry({
               sessionId: sessionIdUsed,
               sessionKey: params.sessionKey,
@@ -700,6 +717,14 @@ export async function runEmbeddedPiAgent(
               agentMeta,
               toolMetas: attempt.toolMetas,
               toolErrors: attempt.toolErrors,
+              // Pass goals for auto-satisfaction derivation
+              goals: finalGoals
+                ? {
+                    initial: finalGoals, // TODO: Capture initial state at start of run
+                    final: finalGoals,
+                  }
+                : undefined,
+              contextText: params.prompt,
             }).catch((err) => {
               log.debug(`evolution telemetry failed: ${String(err)}`);
             });
