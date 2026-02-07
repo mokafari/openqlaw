@@ -354,24 +354,51 @@ export class Mutator {
 
   /**
    * Map tool name to source file path.
-   * This is a simplified mapping - in production, this would be more comprehensive.
+   * Maps tool names to their actual source file locations.
    */
   private mapToolToSourceFile(toolName: string): string | undefined {
     // Common tool to file mappings
     const mappings: Record<string, string> = {
+      // Browser and web tools
       browser: "src/agents/tools/browser-tool.ts",
+      web_search: "src/agents/tools/web-search.ts",
+      web_fetch: "src/agents/tools/web-fetch.ts",
+
+      // File operation tools (all in pi-tools.read.ts)
       read: "src/agents/pi-tools.read.ts",
-      write: "src/agents/pi-tools.write.ts",
-      edit: "src/agents/pi-tools.edit.ts",
-      exec: "src/agents/pi-tools.exec.ts",
+      write: "src/agents/pi-tools.read.ts",
+      edit: "src/agents/pi-tools.read.ts",
+
+      // Bash/exec tools
+      exec: "src/agents/bash-tools.exec.ts",
+      process: "src/agents/bash-tools.process.ts",
+
+      // Messaging and channel tools
       message: "src/agents/tools/message-tool.ts",
+
+      // Session tools
       sessions_send: "src/agents/tools/sessions-send-tool.ts",
       sessions_spawn: "src/agents/tools/sessions-spawn-tool.ts",
+      sessions_list: "src/agents/tools/sessions-list-tool.ts",
+      sessions_history: "src/agents/tools/sessions-history-tool.ts",
+
+      // Gateway and infrastructure
       cron: "src/agents/tools/cron-tool.ts",
       gateway: "src/agents/tools/gateway-tool.ts",
+
+      // Image and media
+      image: "src/agents/tools/image-tool.ts",
+
+      // Node tools
+      nodes: "src/agents/tools/nodes-tool.ts",
+
+      // Canvas
+      canvas: "src/agents/tools/canvas-tool.ts",
     };
 
-    return mappings[toolName] ?? `src/agents/tools/${toolName}-tool.ts`;
+    // Return explicit mapping or undefined if not found
+    // Don't use a fallback pattern that generates non-existent paths
+    return mappings[toolName];
   }
 
   /**
