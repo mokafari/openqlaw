@@ -646,30 +646,56 @@ export async function getToolErrorRates(params?: {
 
 /**
  * Get session IDs that had errors for a specific tool.
+ * Filters by severity to only return actionable errors by default.
  */
 export async function getFailingToolSessions(params: {
   toolName: string;
   statsDir?: string;
   limit?: number;
-}): Promise<Array<{ sessionId: string; sessionKey?: string; timestamp: number; error: string }>> {
+  minSeverity?: ErrorSeverity;
+}): Promise<
+  Array<{
+    sessionId: string;
+    sessionKey?: string;
+    timestamp: number;
+    error: string;
+    severity?: ErrorSeverity;
+  }>
+> {
   const allStats = await readSessionStats({ statsDir: params.statsDir });
   const results: Array<{
     sessionId: string;
     sessionKey?: string;
     timestamp: number;
     error: string;
+    severity?: ErrorSeverity;
   }> = [];
+
+  // Default to "warning" to filter out expected/info errors (matching getToolErrorRates behavior)
+  const minSeverity = params.minSeverity ?? "warning";
+  const severityOrder: Record<ErrorSeverity, number> = {
+    expected: 0,
+    info: 1,
+    warning: 2,
+    critical: 3,
+  };
+  const minLevel = severityOrder[minSeverity];
 
   for (const stat of allStats) {
     if (stat.toolErrors?.[params.toolName]) {
       const errorInfo = stat.toolErrors[params.toolName];
       for (const error of errorInfo.errors) {
-        results.push({
-          sessionId: stat.sessionId,
-          sessionKey: stat.sessionKey,
-          timestamp: stat.timestamp,
-          error,
-        });
+        const meta = classifyError(error);
+        // Only include errors that meet minimum severity threshold
+        if (severityOrder[meta.severity] >= minLevel) {
+          results.push({
+            sessionId: stat.sessionId,
+            sessionKey: stat.sessionKey,
+            timestamp: stat.timestamp,
+            error,
+            severity: meta.severity,
+          });
+        }
       }
     }
   }
