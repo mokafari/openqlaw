@@ -15,7 +15,9 @@ export const CONTEXT_AREAS: Record<string, ContextArea> = {
     tools: ["read", "write", "edit", "apply_patch", "grep", "find", "ls"],
     preconditions: [],
     entryActions: [],
-    requiredReachability: ["READ"], // At minimum, need read access
+    // Note: Don't require READ/WRITE here - individual tools have different requirements.
+    // The read tool needs READ, write tool needs WRITE, etc. Reachability checks
+    // should be done per-tool, not per-area, to avoid blocking write when READ is unavailable.
   },
   browser: {
     id: "browser",
