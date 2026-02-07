@@ -1,6 +1,7 @@
 import type { ToolErrorInfo } from "./telemetry.js";
 import { loadConfig } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
+import { log } from "../pi-embedded-runner/logger.js";
 import { buildDiagnosticAgentPrompt } from "./diagnostic-prompt.js";
 import { runDojoTask, type DojoTask } from "./dojo.js";
 import { loadGenotype } from "./genotype.js";
@@ -152,6 +153,46 @@ export class Mutator {
   }
 
   /**
+   * Check if a tool has already been fixed by an applied patch.
+   * Returns information about the most recent patch if found.
+   */
+  private async isToolAlreadyFixed(
+    toolName: string,
+    withinHours: number = 24,
+  ): Promise<{
+    alreadyFixed: boolean;
+    patchId?: string;
+    hoursAgo?: number;
+  }> {
+    const sourceFile = this.mapToolToSourceFile(toolName);
+    if (!sourceFile) {
+      return { alreadyFixed: false };
+    }
+
+    const appliedPatches = await getAppliedPatchesForFile(sourceFile, { withinHours });
+    if (appliedPatches.length === 0) {
+      return { alreadyFixed: false };
+    }
+
+    // Get the most recent patch
+    const mostRecent = appliedPatches.sort((a, b) => {
+      const aTime = a.appliedAt ?? a.createdAt;
+      const bTime = b.appliedAt ?? b.createdAt;
+      return bTime - aTime;
+    })[0];
+
+    const now = Date.now();
+    const appliedAt = mostRecent.appliedAt ?? mostRecent.createdAt;
+    const hoursAgo = Math.round((now - appliedAt) / (1000 * 60 * 60));
+
+    return {
+      alreadyFixed: true,
+      patchId: mostRecent.id,
+      hoursAgo,
+    };
+  }
+
+  /**
    * Spawn a diagnostic agent to analyze a tool failure.
    * Waits for the agent to complete and extracts any patches from tool calls.
    */
@@ -212,6 +253,8 @@ export class Mutator {
 
     // Get throttler config for timeout and thinking level
     const diagConfig = throttler.getConfig();
+    const waitTimeout = diagConfig.timeout;
+    const spawnStartTime = Date.now();
 
     try {
       // Record spawn
