@@ -34,19 +34,44 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Validate required parameters for built-in tools.
+ * Returns a block reason if validation fails, undefined otherwise.
+ */
+function validateBuiltInToolParams(toolName: string, params: unknown): string | undefined {
+  const record = isPlainObject(params) ? params : {};
+
+  // Read tool requires a path parameter
+  if (toolName === "read") {
+    const path = typeof record.path === "string" ? record.path.trim() : "";
+    const filePath = typeof record.file_path === "string" ? record.file_path.trim() : "";
+    if (!path && !filePath) {
+      return 'Read tool requires "path" or "file_path" parameter. Provide the file path to read.';
+    }
+  }
+
+  return undefined;
+}
+
 export async function runBeforeToolCallHook(args: {
   toolName: string;
   params: unknown;
   toolCallId?: string;
   ctx?: HookContext;
 }): Promise<HookOutcome> {
-  const hookRunner = getGlobalHookRunner();
-  if (!hookRunner?.hasHooks("before_tool_call")) {
-    return { blocked: false, params: args.params };
-  }
-
   const toolName = normalizeToolName(args.toolName || "tool");
   const params = args.params;
+
+  // Built-in validation for required parameters
+  const validationError = validateBuiltInToolParams(toolName, params);
+  if (validationError) {
+    return { blocked: true, reason: validationError };
+  }
+
+  const hookRunner = getGlobalHookRunner();
+  if (!hookRunner?.hasHooks("before_tool_call")) {
+    return { blocked: false, params };
+  }
   try {
     const normalizedParams = isPlainObject(params) ? params : {};
     const hookResult = await hookRunner.runBeforeToolCall(
