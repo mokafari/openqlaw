@@ -31,7 +31,7 @@ const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again.";
 async function resolveStickerVisionSupport(cfg: OpenClawConfig, agentId: string) {
   try {
     const catalog = await loadModelCatalog({ config: cfg });
-    const defaultModel = resolveDefaultModelForAgent({ cfg, agentId });
+    const defaultModel = await resolveDefaultModelForAgent({ cfg, agentId });
     const entry = findModelInCatalog(catalog, defaultModel.provider, defaultModel.model);
     if (!entry) {
       return false;

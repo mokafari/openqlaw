@@ -215,7 +215,7 @@ export async function buildSystemPrompt(params: {
     lastComplexity?: number;
   };
 }) {
-  const defaultModelRef = resolveDefaultModelForAgent({
+  const defaultModelRef = await resolveDefaultModelForAgent({
     cfg: params.config ?? {},
     agentId: params.agentId,
     sessionEntry: params.sessionEntry,

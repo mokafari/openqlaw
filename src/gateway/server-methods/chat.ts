@@ -218,7 +218,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         thinkingLevel = configured;
       } else {
         const sessionAgentId = resolveSessionAgentId({ sessionKey, config: cfg });
-        const { provider, model } = resolveSessionModelRef(cfg, entry, sessionAgentId);
+        const { provider, model } = await resolveSessionModelRef(cfg, entry, sessionAgentId);
         const catalog = await context.loadGatewayModelCatalog();
         thinkingLevel = resolveThinkingDefault({
           cfg,

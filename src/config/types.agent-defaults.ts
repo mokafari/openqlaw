@@ -239,6 +239,22 @@ export type AgentDefaultsConfig = {
     /** Auto-prune sandbox containers. */
     prune?: SandboxPruneSettings;
   };
+  /** Ollama fallback configuration. */
+  ollamaFallback?: {
+    /** Enable automatic Ollama fallback (default: true). */
+    enabled?: boolean;
+    /** Automatically add Ollama to fallbacks when available (default: true). */
+    autoAdd?: boolean;
+    /** Position in fallback chain: -1 = last (default), 0 = first, positive = specific index. */
+    priority?: number;
+  };
+  /** Cost-aware routing configuration. */
+  costAwareRouting?: {
+    /** Enable cost-aware routing to use Ollama for low-complexity tasks (default: false). */
+    enabled?: boolean;
+    /** Use Ollama for tasks below this complexity threshold (0-1, default: 0.3). */
+    ollamaThreshold?: number;
+  };
 };
 
 export type AgentCompactionMode = "default" | "safeguard";

@@ -15,10 +15,10 @@ import {
 
 export type SessionsResolveResult = { ok: true; key: string } | { ok: false; error: ErrorShape };
 
-export function resolveSessionKeyFromResolveParams(params: {
+export async function resolveSessionKeyFromResolveParams(params: {
   cfg: OpenClawConfig;
   p: SessionsResolveParams;
-}): SessionsResolveResult {
+}): Promise<SessionsResolveResult> {
   const { cfg, p } = params;
 
   const key = typeof p.key === "string" ? p.key.trim() : "";
@@ -58,7 +58,7 @@ export function resolveSessionKeyFromResolveParams(params: {
 
   if (hasSessionId) {
     const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
-    const list = listSessionsFromStore({
+    const list = await listSessionsFromStore({
       cfg,
       storePath,
       store,

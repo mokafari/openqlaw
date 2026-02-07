@@ -1678,6 +1678,19 @@ Controls the embedded agent runtime (model/thinking/verbose/timeouts).
 `agents.defaults.imageModel` is optional and is **only used if the primary model lacks image input**.
 Each `agents.defaults.models` entry can include:
 
+**Ollama fallback configuration**:
+
+- `agents.defaults.ollamaFallback.enabled` (boolean, default: `true`): Enable automatic Ollama fallback
+- `agents.defaults.ollamaFallback.autoAdd` (boolean, default: `true`): Automatically add Ollama to fallbacks when available
+- `agents.defaults.ollamaFallback.priority` (number, default: `-1`): Position in fallback chain (-1 = last, 0 = first, positive = index)
+
+**Cost-aware routing**:
+
+- `agents.defaults.costAwareRouting.enabled` (boolean, default: `false`): Enable cost-aware routing to use Ollama for low-complexity tasks
+- `agents.defaults.costAwareRouting.ollamaThreshold` (number, 0-1, default: `0.3`): Use Ollama for tasks below this complexity threshold
+
+See [Ollama provider docs](/providers/ollama) for configuration examples.
+
 - `alias` (optional model shortcut, e.g. `/opus`).
 - `params` (optional provider-specific API params passed through to the model request).
 

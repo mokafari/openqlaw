@@ -168,6 +168,21 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    ollamaFallback: z
+      .object({
+        enabled: z.boolean().optional(),
+        autoAdd: z.boolean().optional(),
+        priority: z.number().int().optional(),
+      })
+      .strict()
+      .optional(),
+    costAwareRouting: z
+      .object({
+        enabled: z.boolean().optional(),
+        ollamaThreshold: z.number().min(0).max(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();

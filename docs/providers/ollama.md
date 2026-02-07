@@ -156,6 +156,97 @@ Once configured, all your Ollama models are available:
 }
 ```
 
+### Automatic fallback
+
+OpenClaw can automatically add Ollama to your fallback chain when it's available. This provides a free, local backup when your primary provider fails (rate limits, timeouts, etc.).
+
+**Default behavior** (enabled by default):
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: {
+        primary: "anthropic/claude-opus-4-5",
+        // Ollama automatically added as last fallback when available
+      },
+      ollamaFallback: {
+        enabled: true, // Enable automatic Ollama fallback
+        autoAdd: true, // Automatically add to fallbacks
+        priority: -1, // Position: -1 = last (default), 0 = first, positive = index
+      },
+    },
+  },
+}
+```
+
+**Disable auto-add** (use manual fallbacks only):
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: {
+        primary: "anthropic/claude-opus-4-5",
+        fallbacks: ["ollama/llama3.3"], // Manual placement
+      },
+      ollamaFallback: {
+        enabled: true,
+        autoAdd: false, // Don't auto-add, use manual fallbacks
+      },
+    },
+  },
+}
+```
+
+**Priority options**:
+
+- `-1` (default): Append Ollama to the end of the fallback chain (safest)
+- `0`: Prepend Ollama right after the primary model (most aggressive)
+- Positive number: Insert at specific index (e.g., `2` = third position)
+
+### Cost-aware routing
+
+Use Ollama for low-complexity tasks to save on API costs. When enabled, OpenClaw analyzes task complexity and routes simple tasks to Ollama automatically.
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: {
+        primary: "anthropic/claude-opus-4-5",
+      },
+      ollamaFallback: {
+        enabled: true,
+        autoAdd: true,
+      },
+      costAwareRouting: {
+        enabled: true,
+        ollamaThreshold: 0.3, // Use Ollama for tasks < 30% complexity
+      },
+    },
+  },
+}
+```
+
+**How it works**:
+
+- Analyzes prompt text for complexity indicators (length, keywords, tool usage)
+- If complexity < threshold AND Ollama is available → routes to Ollama
+- Otherwise → uses primary model
+- Falls back to primary model if Ollama becomes unavailable
+
+**Complexity analysis**:
+
+- Simple tasks (lower complexity): "what time is it", "list files", "show status"
+- Complex tasks (higher complexity): "refactor architecture", "implement new system", "debug complex issue"
+
+Adjust `ollamaThreshold` (0.0-1.0) to control when Ollama is used:
+
+- `0.1`: Only very simple tasks
+- `0.3`: Simple to moderate tasks (default)
+- `0.5`: Most tasks except complex ones
+
 ## Advanced
 
 ### Reasoning models

@@ -111,8 +111,14 @@ export async function runEmbeddedPiAgent(
       const provider = (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
       const modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
       const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
-      const fallbackConfigured =
+      const explicitFallbacks =
         (params.config?.agents?.defaults?.model?.fallbacks?.length ?? 0) > 0;
+      const ollamaFallbackEnabled =
+        params.config?.agents?.defaults?.ollamaFallback?.enabled !== false;
+      const ollamaFallbackAutoAdd =
+        params.config?.agents?.defaults?.ollamaFallback?.autoAdd !== false;
+      const fallbackConfigured =
+        explicitFallbacks || (ollamaFallbackEnabled && ollamaFallbackAutoAdd);
       await ensureOpenClawModelsJson(params.config, agentDir);
 
       const { model, error, authStorage, modelRegistry } = resolveModel(

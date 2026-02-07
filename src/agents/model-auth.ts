@@ -204,6 +204,16 @@ export async function resolveApiKeyForProvider(params: {
     return { apiKey: customKey, source: "models.json", mode: "api-key" };
   }
 
+  // Ollama doesn't require a real API key - use placeholder if provider is registered
+  if (provider === "ollama") {
+    const providerConfig = cfg?.models?.providers?.[provider];
+    if (providerConfig?.apiKey) {
+      return { apiKey: providerConfig.apiKey, source: "models.json", mode: "api-key" };
+    }
+    // Even if not in config, Ollama is local and doesn't need auth
+    return { apiKey: "ollama-local", source: "auto-registered", mode: "api-key" };
+  }
+
   const normalized = normalizeProviderId(provider);
   if (authOverride === undefined && normalized === "amazon-bedrock") {
     return resolveAwsSdkAuthInfo();

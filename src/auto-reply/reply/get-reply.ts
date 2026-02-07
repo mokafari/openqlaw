@@ -159,7 +159,7 @@ export async function getReplyFromConfig(
     bodyStripped,
   } = sessionState;
 
-  const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
+  const { defaultProvider, defaultModel, aliasIndex } = await resolveDefaultModel({
     cfg,
     agentId,
     sessionEntry,

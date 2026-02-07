@@ -80,7 +80,7 @@ export async function modelsStatusCommand(
     ? resolveAgentModelFallbacksOverride(cfg, agentId)
     : undefined;
   const resolved = agentId
-    ? resolveDefaultModelForAgent({ cfg, agentId })
+    ? await resolveDefaultModelForAgent({ cfg, agentId })
     : resolveConfiguredModelRef({
         cfg,
         defaultProvider: DEFAULT_PROVIDER,

@@ -207,7 +207,7 @@ async function resolveModelOverride(params: {
     return { kind: "reset" };
   }
 
-  const configDefault = resolveDefaultModelForAgent({
+  const configDefault = await resolveDefaultModelForAgent({
     cfg: params.cfg,
     agentId: params.agentId,
   });
@@ -334,7 +334,7 @@ export function createSessionStatusTool(opts?: {
         throw new Error(`Unknown ${kind}: ${requestedKeyRaw}`);
       }
 
-      const configured = resolveDefaultModelForAgent({ cfg, agentId });
+      const configured = await resolveDefaultModelForAgent({ cfg, agentId });
       const modelRaw = readStringParam(params, "model");
       let changedModel = false;
       if (typeof modelRaw === "string") {

@@ -109,7 +109,7 @@ async function resolveStickerVisionSupport(params: {
 }): Promise<boolean> {
   try {
     const catalog = await loadModelCatalog({ config: params.cfg });
-    const defaultModel = resolveDefaultModelForAgent({
+    const defaultModel = await resolveDefaultModelForAgent({
       cfg: params.cfg,
       agentId: params.agentId,
     });

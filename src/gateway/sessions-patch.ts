@@ -69,7 +69,7 @@ export async function applySessionsPatchToStore(params: {
   const now = Date.now();
   const parsedAgent = parseAgentSessionKey(storeKey);
   const sessionAgentId = normalizeAgentId(parsedAgent?.agentId ?? resolveDefaultAgentId(cfg));
-  const resolvedDefault = resolveDefaultModelForAgent({ cfg, agentId: sessionAgentId });
+  const resolvedDefault = await resolveDefaultModelForAgent({ cfg, agentId: sessionAgentId });
 
   const existing = store[storeKey];
   const next: SessionEntry = existing

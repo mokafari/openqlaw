@@ -293,7 +293,7 @@ export async function createModelSelectionState(params: {
   } = params;
 
   const activeAgentId = sessionKey ? resolveSessionAgentId({ sessionKey, config: cfg }) : undefined;
-  const initialModel = resolveDefaultModelForAgent({
+  const initialModel = await resolveDefaultModelForAgent({
     cfg,
     agentId: activeAgentId,
     sessionEntry,

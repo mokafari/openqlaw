@@ -522,13 +522,13 @@ export function getSessionDefaults(cfg: OpenClawConfig): GatewaySessionsDefaults
   };
 }
 
-export function resolveSessionModelRef(
+export async function resolveSessionModelRef(
   cfg: OpenClawConfig,
   entry?: SessionEntry,
   agentId?: string,
-): { provider: string; model: string } {
+): Promise<{ provider: string; model: string }> {
   const resolved = agentId
-    ? resolveDefaultModelForAgent({ cfg, agentId, sessionEntry: entry })
+    ? await resolveDefaultModelForAgent({ cfg, agentId, sessionEntry: entry })
     : resolveConfiguredModelRef({
         cfg,
         defaultProvider: DEFAULT_PROVIDER,
@@ -544,12 +544,12 @@ export function resolveSessionModelRef(
   return { provider, model };
 }
 
-export function listSessionsFromStore(params: {
+export async function listSessionsFromStore(params: {
   cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
   opts: import("./protocol/index.js").SessionsListParams;
-}): SessionsListResult {
+}): Promise<SessionsListResult> {
   const { cfg, storePath, store, opts } = params;
   const now = Date.now();
 
@@ -566,7 +566,7 @@ export function listSessionsFromStore(params: {
       ? Math.max(1, Math.floor(opts.activeMinutes))
       : undefined;
 
-  let sessions = Object.entries(store)
+  const filteredEntries = Object.entries(store)
     .filter(([key]) => {
       if (!includeGlobal && key === "global") {
         return false;
@@ -600,8 +600,10 @@ export function listSessionsFromStore(params: {
         return true;
       }
       return entry?.label === label;
-    })
-    .map(([key, entry]) => {
+    });
+
+  let sessions = await Promise.all(
+    filteredEntries.map(async ([key, entry]) => {
       const updatedAt = entry?.updatedAt ?? null;
       const input = entry?.inputTokens ?? 0;
       const output = entry?.outputTokens ?? 0;
@@ -631,7 +633,7 @@ export function listSessionsFromStore(params: {
       const deliveryFields = normalizeSessionDeliveryFields(entry);
       const parsedAgent = parseAgentSessionKey(key);
       const sessionAgentId = normalizeAgentId(parsedAgent?.agentId ?? resolveDefaultAgentId(cfg));
-      const resolvedModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
+      const resolvedModel = await resolveSessionModelRef(cfg, entry, sessionAgentId);
       const modelProvider = resolvedModel.provider ?? DEFAULT_PROVIDER;
       const model = resolvedModel.model ?? DEFAULT_MODEL;
       return {
@@ -667,8 +669,10 @@ export function listSessionsFromStore(params: {
         lastTo: deliveryFields.lastTo ?? entry?.lastTo,
         lastAccountId: deliveryFields.lastAccountId ?? entry?.lastAccountId,
       };
-    })
-    .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    }),
+  );
+
+  sessions = sessions.toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
   if (search) {
     sessions = sessions.filter((s) => {

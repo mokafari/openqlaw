@@ -159,7 +159,7 @@ export interface DescribeStickerParams {
 export async function describeStickerImage(params: DescribeStickerParams): Promise<string | null> {
   const { imagePath, cfg, agentDir, agentId } = params;
 
-  const defaultModel = resolveDefaultModelForAgent({ cfg, agentId });
+  const defaultModel = await resolveDefaultModelForAgent({ cfg, agentId });
   let activeModel = undefined as { provider: string; model: string } | undefined;
   let catalog: ModelCatalogEntry[] = [];
   try {

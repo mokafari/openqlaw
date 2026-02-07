@@ -321,7 +321,7 @@ export async function runEmbeddedAttempt(
         })
       : undefined;
 
-    const defaultModelRef = resolveDefaultModelForAgent({
+    const defaultModelRef = await resolveDefaultModelForAgent({
       cfg: params.config ?? {},
       agentId: sessionAgentId,
       prompt: params.prompt,

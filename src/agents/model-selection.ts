@@ -4,7 +4,7 @@ import { resolveAgentModelPrimary } from "./agent-scope.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import { FuzzyModelSelector } from "./evolution/fuzzy-model-selector.js";
 import { analyzeTaskComplexity } from "./fuzzy-selector.js";
-import { normalizeGoogleModelId } from "./models-config.providers.js";
+import { checkOllamaAvailability, normalizeGoogleModelId } from "./models-config.providers.js";
 
 export type ModelRef = {
   provider: string;
@@ -196,7 +196,7 @@ export function resolveConfiguredModelRef(params: {
   return { provider: params.defaultProvider, model: params.defaultModel };
 }
 
-export function resolveDefaultModelForAgent(params: {
+export async function resolveDefaultModelForAgent(params: {
   cfg: OpenClawConfig;
   agentId?: string;
   sessionEntry?: {
@@ -206,7 +206,43 @@ export function resolveDefaultModelForAgent(params: {
     lastComplexity?: number;
   };
   prompt?: string;
-}): ModelRef {
+}): Promise<ModelRef> {
+  // Cost-aware routing: check if we should use Ollama for low-complexity tasks
+  const costAwareConfig = params.cfg.agents?.defaults?.costAwareRouting;
+  const costAwareEnabled = costAwareConfig?.enabled === true;
+  const ollamaThreshold = costAwareConfig?.ollamaThreshold ?? 0.3;
+
+  if (costAwareEnabled && params.prompt) {
+    try {
+      const complexity = analyzeTaskComplexity(params.prompt);
+      if (complexity < ollamaThreshold) {
+        const ollamaAvailability = await checkOllamaAvailability();
+        if (ollamaAvailability.available && ollamaAvailability.preferredModel) {
+          // Route to Ollama for low-complexity tasks
+          console.log(
+            `[cost-aware-routing] Routing to Ollama (complexity: ${complexity.toFixed(2)} < ${ollamaThreshold}, model: ${ollamaAvailability.preferredModel})`,
+          );
+          return {
+            provider: "ollama",
+            model: ollamaAvailability.preferredModel,
+          };
+        } else {
+          console.log(
+            `[cost-aware-routing] Complexity ${complexity.toFixed(2)} < ${ollamaThreshold} but Ollama not available`,
+          );
+        }
+      } else {
+        console.log(
+          `[cost-aware-routing] Complexity ${complexity.toFixed(2)} >= ${ollamaThreshold}, using primary model`,
+        );
+      }
+    } catch (error) {
+      // Silently fail cost-aware routing - fall through to normal resolution
+      // Error is already logged in checkOllamaAvailability
+      console.log(`[cost-aware-routing] Error during routing: ${String(error)}`);
+    }
+  }
+
   // Fuzzy model selection: when evolution or fuzzyModelSelection is enabled
   // and session data is available, use the Quake-inspired fuzzy selector.
   const evolutionEnabled = params.cfg.tools?.evolution?.selfModification?.enabled ?? false;

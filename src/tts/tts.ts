@@ -880,11 +880,11 @@ type SummaryModelSelection = {
   source: "summaryModel" | "default";
 };
 
-function resolveSummaryModelRef(
+async function resolveSummaryModelRef(
   cfg: OpenClawConfig,
   config: ResolvedTtsConfig,
-): SummaryModelSelection {
-  const defaultRef = resolveDefaultModelForAgent({ cfg });
+): Promise<SummaryModelSelection> {
+  const defaultRef = await resolveDefaultModelForAgent({ cfg });
   const override = config.summaryModel?.trim();
   if (!override) {
     return { ref: defaultRef, source: "default" };
@@ -919,7 +919,7 @@ async function summarizeText(params: {
   }
 
   const startTime = Date.now();
-  const { ref } = resolveSummaryModelRef(cfg, config);
+  const { ref } = await resolveSummaryModelRef(cfg, config);
   const resolved = resolveModel(ref.provider, ref.model, undefined, cfg);
   if (!resolved.model) {
     throw new Error(resolved.error ?? `Unknown summary model: ${ref.provider}/${ref.model}`);

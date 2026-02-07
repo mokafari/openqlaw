@@ -136,6 +136,45 @@ timeouts that exhausted profile rotation (other errors do not advance fallback).
 When a run starts with a model override (hooks or CLI), fallbacks still end at
 `agents.defaults.model.primary` after trying any configured fallbacks.
 
+### Automatic Ollama fallback
+
+When Ollama is available and auto-fallback is enabled, OpenClaw automatically adds Ollama models to your fallback chain. This provides a free, local backup when your primary provider fails.
+
+**Configuration**:
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: {
+        primary: "anthropic/claude-opus-4-5",
+      },
+      ollamaFallback: {
+        enabled: true, // Enable automatic Ollama fallback (default: true)
+        autoAdd: true, // Automatically add to fallbacks (default: true)
+        priority: -1, // Position in fallback chain (default: -1 = last)
+      },
+    },
+  },
+}
+```
+
+**Behavior**:
+
+- Ollama is checked for availability (cached for 30 seconds)
+- If available, Ollama is added to the fallback chain at the configured priority
+- When primary model fails (rate limit, timeout, etc.), Ollama is tried automatically
+- If Ollama is unavailable during fallback, it's skipped gracefully
+- Manual fallback configuration takes precedence (auto-add is skipped if `fallbacks` is explicitly set)
+
+**Priority options**:
+
+- `-1` (default): Append to end of fallback chain
+- `0`: Insert right after primary model
+- Positive number: Insert at specific index
+
+See [Ollama provider docs](/providers/ollama) for more details.
+
 ## Related config
 
 See [Gateway configuration](/gateway/configuration) for:

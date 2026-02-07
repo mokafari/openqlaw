@@ -133,6 +133,124 @@ async function discoverOllamaModels(): Promise<ModelDefinitionConfig[]> {
   }
 }
 
+type OllamaAvailabilityResult = {
+  available: boolean;
+  preferredModel?: string;
+  models?: string[];
+};
+
+// Cache for Ollama availability checks (TTL: 30 seconds)
+let ollamaAvailabilityCache: {
+  result: OllamaAvailabilityResult;
+  timestamp: number;
+} | null = null;
+
+const OLLAMA_AVAILABILITY_CACHE_TTL_MS = 30_000;
+
+/**
+ * Check if Ollama is available and return preferred model.
+ * Results are cached for 30 seconds to avoid repeated network calls.
+ */
+export async function checkOllamaAvailability(): Promise<OllamaAvailabilityResult> {
+  // Return cached result if still valid
+  if (ollamaAvailabilityCache) {
+    const age = Date.now() - ollamaAvailabilityCache.timestamp;
+    if (age < OLLAMA_AVAILABILITY_CACHE_TTL_MS) {
+      return ollamaAvailabilityCache.result;
+    }
+  }
+
+  // Skip availability check in test environments
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    const result: OllamaAvailabilityResult = { available: false };
+    ollamaAvailabilityCache = { result, timestamp: Date.now() };
+    return result;
+  }
+
+  try {
+    const response = await fetch(`${OLLAMA_API_BASE_URL}/api/tags`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) {
+      const result: OllamaAvailabilityResult = { available: false };
+      ollamaAvailabilityCache = { result, timestamp: Date.now() };
+      return result;
+    }
+    const data = (await response.json()) as OllamaTagsResponse;
+    if (!data.models || data.models.length === 0) {
+      const result: OllamaAvailabilityResult = { available: false };
+      ollamaAvailabilityCache = { result, timestamp: Date.now() };
+      return result;
+    }
+
+    // Filter to tool-capable models (we check /api/show for tools capability)
+    // For now, we'll assume all discovered models are potentially tool-capable
+    // The actual tool capability check happens during full discovery
+    const modelNames = data.models.map((m) => m.name);
+
+    // Prefer larger/better models for fallback - sort by size/quality indicators
+    // Priority: models with size indicators, larger models, coding models, reasoning models
+    const preferredModel = modelNames.sort((a, b) => {
+      // Helper to extract model size from name (e.g., "qwen2.5:14b" -> 14)
+      const extractModelSize = (name: string): { size: number; hasSize: boolean } => {
+        // Try to match patterns like "14b", "7b", "3b" (with optional decimal)
+        // Must have "b" or "B" suffix to be considered a size indicator
+        const sizeMatch = name.match(/(\d+(?:\.\d+)?)[bB](?:-|:|\s|$)/);
+        if (sizeMatch) {
+          return { size: parseFloat(sizeMatch[1]), hasSize: true };
+        }
+        // No size indicator found
+        return { size: 0, hasSize: false };
+      };
+
+      const aInfo = extractModelSize(a);
+      const bInfo = extractModelSize(b);
+
+      // Prefer models with explicit size indicators
+      if (aInfo.hasSize && !bInfo.hasSize) return -1;
+      if (!aInfo.hasSize && bInfo.hasSize) return 1;
+
+      // Prefer larger models first
+      if (aInfo.size !== bInfo.size) {
+        return bInfo.size - aInfo.size; // Larger first
+      }
+
+      // If same size, prefer coding models (better for tool calling)
+      const aIsCoder = a.toLowerCase().includes("coder") || a.toLowerCase().includes("code");
+      const bIsCoder = b.toLowerCase().includes("coder") || b.toLowerCase().includes("code");
+      if (aIsCoder && !bIsCoder) return -1;
+      if (!aIsCoder && bIsCoder) return 1;
+
+      // Prefer reasoning models (r1, reasoning)
+      const aIsReasoning = a.toLowerCase().includes("r1") || a.toLowerCase().includes("reasoning");
+      const bIsReasoning = b.toLowerCase().includes("r1") || b.toLowerCase().includes("reasoning");
+      if (aIsReasoning && !bIsReasoning) return -1;
+      if (!aIsReasoning && bIsReasoning) return 1;
+
+      // Prefer "instruct" models (better instruction following)
+      const aIsInstruct = a.toLowerCase().includes("instruct");
+      const bIsInstruct = b.toLowerCase().includes("instruct");
+      if (aIsInstruct && !bIsInstruct) return -1;
+      if (!aIsInstruct && bIsInstruct) return 1;
+
+      // Fallback to alphabetical
+      return a.localeCompare(b);
+    })[0];
+
+    const result: OllamaAvailabilityResult = {
+      available: true,
+      preferredModel,
+      models: modelNames,
+    };
+    ollamaAvailabilityCache = { result, timestamp: Date.now() };
+    return result;
+  } catch (error) {
+    const result: OllamaAvailabilityResult = { available: false };
+    ollamaAvailabilityCache = { result, timestamp: Date.now() };
+    return result;
+  }
+}
+
 function normalizeApiKeyConfig(value: string): string {
   const trimmed = value.trim();
   const match = /^\$\{([A-Z0-9_]+)\}$/.exec(trimmed);
@@ -485,11 +603,24 @@ export async function resolveImplicitProviders(params: {
     break;
   }
 
-  // Ollama provider - only add if explicitly configured
+  // Ollama provider - add if explicitly configured OR if available (auto-register)
+  // This allows auto-fallback to work without requiring OLLAMA_API_KEY
   const ollamaKey =
     resolveEnvApiKeyVarName("ollama") ??
     resolveApiKeyFromProfiles({ provider: "ollama", store: authStore });
-  if (ollamaKey) {
+
+  // Auto-register Ollama if available (even without explicit key)
+  // This enables auto-fallback without requiring OLLAMA_API_KEY
+  if (!ollamaKey) {
+    try {
+      const availability = await checkOllamaAvailability();
+      if (availability.available) {
+        providers.ollama = { ...(await buildOllamaProvider()), apiKey: "ollama-local" };
+      }
+    } catch {
+      // Silently fail - Ollama not available
+    }
+  } else {
     providers.ollama = { ...(await buildOllamaProvider()), apiKey: ollamaKey };
   }
 

@@ -19,6 +19,7 @@ import {
   resolveConfiguredModelRef,
   resolveModelRefFromString,
 } from "./model-selection.js";
+import { checkOllamaAvailability } from "./models-config.providers.js";
 
 type ModelCandidate = {
   provider: string;
@@ -144,13 +145,13 @@ function resolveImageFallbackCandidates(params: {
   return candidates;
 }
 
-function resolveFallbackCandidates(params: {
+async function resolveFallbackCandidates(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   model: string;
   /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
   fallbacksOverride?: string[];
-}): ModelCandidate[] {
+}): Promise<ModelCandidate[]> {
   const primary = params.cfg
     ? resolveConfiguredModelRef({
         cfg: params.cfg,
@@ -217,6 +218,74 @@ function resolveFallbackCandidates(params: {
     addCandidate({ provider: primary.provider, model: primary.model }, false);
   }
 
+  // Auto-add Ollama to fallbacks if enabled and available
+  const ollamaConfig = params.cfg?.agents?.defaults?.ollamaFallback;
+  const ollamaEnabled = ollamaConfig?.enabled !== false; // Default: true
+  const ollamaAutoAdd = ollamaConfig?.autoAdd !== false; // Default: true
+  const ollamaPriority = ollamaConfig?.priority ?? -1; // Default: -1 (last)
+
+  if (
+    ollamaEnabled &&
+    ollamaAutoAdd &&
+    params.fallbacksOverride === undefined && // Don't auto-add if user explicitly set fallbacks
+    candidates.length > 0 // Only add if we have candidates
+  ) {
+    try {
+      const ollamaAvailability = await checkOllamaAvailability();
+      if (ollamaAvailability.available && ollamaAvailability.preferredModel) {
+        const ollamaCandidate: ModelCandidate = {
+          provider: "ollama",
+          model: ollamaAvailability.preferredModel,
+        };
+        const ollamaKey = modelKey(ollamaCandidate.provider, ollamaCandidate.model);
+
+        // Only add if not already in the list
+        if (!seen.has(ollamaKey)) {
+          if (ollamaPriority === -1) {
+            // Append to end (default)
+            addCandidate(ollamaCandidate, true);
+            console.log(
+              `[ollama-fallback] Auto-added Ollama (${ollamaCandidate.model}) to fallback chain (position: last)`,
+            );
+          } else if (ollamaPriority === 0) {
+            // Prepend to start (after primary)
+            candidates.splice(1, 0, ollamaCandidate);
+            seen.add(ollamaKey);
+            console.log(
+              `[ollama-fallback] Auto-added Ollama (${ollamaCandidate.model}) to fallback chain (position: first)`,
+            );
+          } else if (ollamaPriority > 0) {
+            // Insert at specific index
+            const insertIndex = Math.min(ollamaPriority + 1, candidates.length);
+            candidates.splice(insertIndex, 0, ollamaCandidate);
+            seen.add(ollamaKey);
+            console.log(
+              `[ollama-fallback] Auto-added Ollama (${ollamaCandidate.model}) to fallback chain (position: ${insertIndex})`,
+            );
+          } else {
+            // Negative but not -1: insert from end
+            const insertIndex = Math.max(0, candidates.length + ollamaPriority + 1);
+            candidates.splice(insertIndex, 0, ollamaCandidate);
+            seen.add(ollamaKey);
+            console.log(
+              `[ollama-fallback] Auto-added Ollama (${ollamaCandidate.model}) to fallback chain (position: ${insertIndex})`,
+            );
+          }
+        }
+      } else if (ollamaEnabled && ollamaAutoAdd) {
+        console.log(
+          `[ollama-fallback] Ollama auto-add enabled but Ollama is not available (available: ${ollamaAvailability.available})`,
+        );
+      }
+    } catch (error) {
+      // Silently fail availability check - don't block fallback chain
+      // Error is already logged in checkOllamaAvailability
+      if (ollamaEnabled && ollamaAutoAdd) {
+        console.log(`[ollama-fallback] Failed to check Ollama availability: ${String(error)}`);
+      }
+    }
+  }
+
   return candidates;
 }
 
@@ -241,7 +310,7 @@ export async function runWithModelFallback<T>(params: {
   model: string;
   attempts: FallbackAttempt[];
 }> {
-  const candidates = resolveFallbackCandidates({
+  const candidates = await resolveFallbackCandidates({
     cfg: params.cfg,
     provider: params.provider,
     model: params.model,
@@ -255,6 +324,33 @@ export async function runWithModelFallback<T>(params: {
 
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
+
+    // Lightweight health check for Ollama before attempting
+    if (candidate.provider === "ollama") {
+      try {
+        const ollamaAvailability = await checkOllamaAvailability();
+        if (!ollamaAvailability.available) {
+          attempts.push({
+            provider: candidate.provider,
+            model: candidate.model,
+            error: "Ollama is not available (server not running or no models found)",
+            reason: "timeout",
+          });
+          continue;
+        }
+        // Update model to preferred if different (in case availability changed)
+        if (
+          ollamaAvailability.preferredModel &&
+          ollamaAvailability.preferredModel !== candidate.model
+        ) {
+          candidate.model = ollamaAvailability.preferredModel;
+        }
+      } catch (error) {
+        // If availability check fails, still attempt the call (might be transient)
+        // The actual call will fail if Ollama is truly unavailable
+      }
+    }
+
     if (authStore) {
       const profileIds = resolveAuthProfileOrder({
         cfg: params.cfg,

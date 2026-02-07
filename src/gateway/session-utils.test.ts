@@ -218,7 +218,7 @@ describe("listSessionsFromStore search", () => {
 
   test("returns all sessions when search is empty", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -229,7 +229,7 @@ describe("listSessionsFromStore search", () => {
 
   test("returns all sessions when search is undefined", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -240,7 +240,7 @@ describe("listSessionsFromStore search", () => {
 
   test("filters by displayName case-insensitively", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -252,7 +252,7 @@ describe("listSessionsFromStore search", () => {
 
   test("filters by subject", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -264,7 +264,7 @@ describe("listSessionsFromStore search", () => {
 
   test("filters by label", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -276,7 +276,7 @@ describe("listSessionsFromStore search", () => {
 
   test("filters by sessionId", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -288,7 +288,7 @@ describe("listSessionsFromStore search", () => {
 
   test("filters by key", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -300,7 +300,7 @@ describe("listSessionsFromStore search", () => {
 
   test("returns empty array when no matches", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -311,7 +311,7 @@ describe("listSessionsFromStore search", () => {
 
   test("matches partial strings", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,
@@ -323,7 +323,7 @@ describe("listSessionsFromStore search", () => {
 
   test("trims whitespace from search query", () => {
     const store = makeStore();
-    const result = listSessionsFromStore({
+    const result = await listSessionsFromStore({
       cfg: baseCfg,
       storePath: "/tmp/sessions.json",
       store,

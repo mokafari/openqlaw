@@ -2,12 +2,13 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
 import { saveAuthProfileStore } from "./auth-profiles.js";
 import { AUTH_STORE_VERSION } from "./auth-profiles/constants.js";
 import { runWithModelFallback } from "./model-fallback.js";
+import * as modelsConfigProviders from "./models-config.providers.js";
 
 function makeCfg(overrides: Partial<OpenClawConfig> = {}): OpenClawConfig {
   return {
@@ -540,5 +541,287 @@ describe("runWithModelFallback", () => {
     expect(run).toHaveBeenCalledTimes(2);
     expect(result.provider).toBe("openai");
     expect(result.model).toBe("gpt-4.1-mini");
+  });
+
+  describe("Ollama auto-fallback", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("auto-adds Ollama to fallbacks when enabled and available", async () => {
+      vi.spyOn(modelsConfigProviders, "checkOllamaAvailability").mockResolvedValue({
+        available: true,
+        preferredModel: "llama3.3",
+        models: ["llama3.3"],
+      });
+
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-opus-4-5",
+            },
+            ollamaFallback: {
+              enabled: true,
+              autoAdd: true,
+              priority: -1,
+            },
+          },
+        },
+      });
+
+      const calls: Array<{ provider: string; model: string }> = [];
+      const run = vi.fn().mockImplementation(async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "anthropic") {
+          throw Object.assign(new Error("rate limit"), { status: 429 });
+        }
+        if (provider === "ollama" && model === "llama3.3") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      });
+
+      const result = await runWithModelFallback({
+        cfg,
+        provider: "anthropic",
+        model: "claude-opus-4-5",
+        run,
+      });
+
+      expect(result.result).toBe("ok");
+      expect(result.provider).toBe("ollama");
+      expect(result.model).toBe("llama3.3");
+      expect(calls).toEqual([
+        { provider: "anthropic", model: "claude-opus-4-5" },
+        { provider: "ollama", model: "llama3.3" },
+      ]);
+    });
+
+    it("does not auto-add Ollama when disabled", async () => {
+      vi.spyOn(modelsConfigProviders, "checkOllamaAvailability").mockResolvedValue({
+        available: true,
+        preferredModel: "llama3.3",
+        models: ["llama3.3"],
+      });
+
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-opus-4-5",
+            },
+            ollamaFallback: {
+              enabled: false,
+            },
+          },
+        },
+      });
+
+      const calls: Array<{ provider: string; model: string }> = [];
+      const run = vi.fn().mockImplementation(async (provider, model) => {
+        calls.push({ provider, model });
+        throw Object.assign(new Error("rate limit"), { status: 429 });
+      });
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-opus-4-5",
+          run,
+        }),
+      ).rejects.toThrow();
+
+      expect(calls).toEqual([{ provider: "anthropic", model: "claude-opus-4-5" }]);
+      expect(modelsConfigProviders.checkOllamaAvailability).not.toHaveBeenCalled();
+    });
+
+    it("does not auto-add Ollama when autoAdd is false", async () => {
+      vi.spyOn(modelsConfigProviders, "checkOllamaAvailability").mockResolvedValue({
+        available: true,
+        preferredModel: "llama3.3",
+        models: ["llama3.3"],
+      });
+
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-opus-4-5",
+            },
+            ollamaFallback: {
+              enabled: true,
+              autoAdd: false,
+            },
+          },
+        },
+      });
+
+      const calls: Array<{ provider: string; model: string }> = [];
+      const run = vi.fn().mockImplementation(async (provider, model) => {
+        calls.push({ provider, model });
+        throw Object.assign(new Error("rate limit"), { status: 429 });
+      });
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-opus-4-5",
+          run,
+        }),
+      ).rejects.toThrow();
+
+      expect(calls).toEqual([{ provider: "anthropic", model: "claude-opus-4-5" }]);
+    });
+
+    it("respects manual fallback configuration (does not auto-add)", async () => {
+      vi.spyOn(modelsConfigProviders, "checkOllamaAvailability").mockResolvedValue({
+        available: true,
+        preferredModel: "llama3.3",
+        models: ["llama3.3"],
+      });
+
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-opus-4-5",
+              fallbacks: ["openai/gpt-4.1-mini"],
+            },
+            ollamaFallback: {
+              enabled: true,
+              autoAdd: true,
+            },
+          },
+        },
+      });
+
+      const calls: Array<{ provider: string; model: string }> = [];
+      const run = vi.fn().mockImplementation(async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "anthropic") {
+          throw Object.assign(new Error("rate limit"), { status: 429 });
+        }
+        if (provider === "openai") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      });
+
+      const result = await runWithModelFallback({
+        cfg,
+        provider: "anthropic",
+        model: "claude-opus-4-5",
+        run,
+      });
+
+      expect(result.result).toBe("ok");
+      expect(calls).toEqual([
+        { provider: "anthropic", model: "claude-opus-4-5" },
+        { provider: "openai", model: "gpt-4.1-mini" },
+      ]);
+      // Should not have checked Ollama availability since fallbacks were explicitly set
+    });
+
+    it("skips Ollama if unavailable during fallback", async () => {
+      vi.spyOn(modelsConfigProviders, "checkOllamaAvailability")
+        .mockResolvedValueOnce({
+          available: true,
+          preferredModel: "llama3.3",
+          models: ["llama3.3"],
+        })
+        .mockResolvedValueOnce({
+          available: false,
+        });
+
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-opus-4-5",
+            },
+            ollamaFallback: {
+              enabled: true,
+              autoAdd: true,
+            },
+          },
+        },
+      });
+
+      const calls: Array<{ provider: string; model: string }> = [];
+      const run = vi.fn().mockImplementation(async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "anthropic") {
+          throw Object.assign(new Error("rate limit"), { status: 429 });
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      });
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "anthropic",
+          model: "claude-opus-4-5",
+          run,
+        }),
+      ).rejects.toThrow();
+
+      expect(calls).toEqual([{ provider: "anthropic", model: "claude-opus-4-5" }]);
+      // Ollama should be skipped due to unavailability check
+    });
+
+    it("inserts Ollama at configured priority", async () => {
+      vi.spyOn(modelsConfigProviders, "checkOllamaAvailability").mockResolvedValue({
+        available: true,
+        preferredModel: "llama3.3",
+        models: ["llama3.3"],
+      });
+
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-opus-4-5",
+              fallbacks: ["openai/gpt-4.1-mini"],
+            },
+            ollamaFallback: {
+              enabled: true,
+              autoAdd: true,
+              priority: 0, // Insert at start (after primary)
+            },
+          },
+        },
+      });
+
+      const calls: Array<{ provider: string; model: string }> = [];
+      const run = vi.fn().mockImplementation(async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "anthropic") {
+          throw Object.assign(new Error("rate limit"), { status: 429 });
+        }
+        if (provider === "ollama") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      });
+
+      const result = await runWithModelFallback({
+        cfg,
+        provider: "anthropic",
+        model: "claude-opus-4-5",
+        run,
+      });
+
+      expect(result.result).toBe("ok");
+      expect(result.provider).toBe("ollama");
+      // Ollama should be tried before the configured fallback
+      expect(calls[1]?.provider).toBe("ollama");
+    });
   });
 });
