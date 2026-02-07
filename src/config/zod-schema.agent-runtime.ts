@@ -612,6 +612,27 @@ export const ToolsSchema = z
           })
           .strict()
           .optional(),
+        telemetryMonitor: z
+          .object({
+            enabled: z.boolean().optional(),
+            errorRateThreshold: z.number().min(0).max(1).optional(),
+            minToolCalls: z.number().int().nonnegative().optional(),
+            checkIntervalMs: z.number().int().positive().optional(),
+            autoMutate: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+        daemon: z
+          .object({
+            enabled: z.boolean().optional(),
+            checkIntervalMs: z.number().int().positive().optional(),
+            fitnessDegradationThreshold: z.number().min(0).max(1).optional(),
+            errorRateThreshold: z.number().min(0).max(1).optional(),
+            minSessionsForEvolution: z.number().int().positive().optional(),
+            autoMutate: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
