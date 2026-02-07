@@ -3,7 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SessionStats } from "./telemetry.js";
-import { calculateFitness, getAggregatedStats, logSessionStats } from "./telemetry.js";
+import {
+  calculateFitness,
+  getAggregatedStats,
+  logSessionStats,
+  classifyError,
+  isExpectedError,
+  filterErrorsBySeverity,
+  getErrorSummary,
+  type ErrorSeverity,
+} from "./telemetry.js";
 
 describe("Evolution Telemetry", () => {
   let tempDir: string;
@@ -376,6 +385,122 @@ describe("Evolution Telemetry", () => {
       expect(aggregated.successRate).toBe(0);
       expect(aggregated.avgTokens).toBe(0);
       expect(aggregated.avgFitness).toBe(0);
+    });
+  });
+
+  describe("classifyError", () => {
+    it("should classify expected errors correctly", () => {
+      const exitCodeError = classifyError("Command exited with code 1");
+      expect(exitCodeError.severity).toBe("expected");
+      expect(exitCodeError.category).toBe("shell");
+
+      const notDueError = classifyError("not-due");
+      expect(notDueError.severity).toBe("expected");
+      expect(notDueError.category).toBe("cron");
+
+      const rateLimitError = classifyError("Rate limit exceeded, 429 Too Many Requests");
+      expect(rateLimitError.severity).toBe("expected");
+      expect(rateLimitError.isTransient).toBe(true);
+    });
+
+    it("should classify warning errors correctly", () => {
+      const networkError = classifyError("ECONNREFUSED: Connection refused");
+      expect(networkError.severity).toBe("warning");
+      expect(networkError.category).toBe("network");
+      expect(networkError.isTransient).toBe(true);
+
+      const authError = classifyError("Authentication failed: 401 Unauthorized");
+      expect(authError.severity).toBe("warning");
+      expect(authError.category).toBe("auth");
+
+      const tsError = classifyError("error TS2345: Argument of type 'string'");
+      expect(tsError.severity).toBe("warning");
+      expect(tsError.category).toBe("typescript");
+    });
+
+    it("should classify critical errors correctly", () => {
+      const crashError = classifyError("Fatal error: Process crashed");
+      expect(crashError.severity).toBe("critical");
+      expect(crashError.category).toBe("crash");
+
+      const unhandledError = classifyError("Unhandled promise rejection: TypeError");
+      expect(unhandledError.severity).toBe("critical");
+      expect(unhandledError.category).toBe("unhandled");
+
+      const stackError = classifyError("Maximum call stack size exceeded");
+      expect(stackError.severity).toBe("critical");
+      expect(stackError.category).toBe("recursion");
+    });
+
+    it("should default unknown errors to warning", () => {
+      const unknownError = classifyError("Some random error message");
+      expect(unknownError.severity).toBe("warning");
+      expect(unknownError.category).toBe("unknown");
+    });
+  });
+
+  describe("isExpectedError", () => {
+    it("should return true for expected errors", () => {
+      expect(isExpectedError("Command exited with code 0")).toBe(true);
+      expect(isExpectedError("not-due")).toBe(true);
+      expect(isExpectedError("ENOENT: .env file not found")).toBe(true);
+      expect(isExpectedError("nothing to commit")).toBe(true);
+    });
+
+    it("should return false for real errors", () => {
+      expect(isExpectedError("Fatal error")).toBe(false);
+      expect(isExpectedError("ECONNREFUSED")).toBe(false);
+      expect(isExpectedError("Permission denied")).toBe(false);
+    });
+  });
+
+  describe("filterErrorsBySeverity", () => {
+    it("should filter errors by minimum severity", () => {
+      const errors = [
+        "Command exited with code 1", // expected
+        "deprecated API warning", // info
+        "ECONNREFUSED", // warning
+        "Fatal crash", // critical
+      ];
+
+      const warningsAndAbove = filterErrorsBySeverity(errors, "warning");
+      expect(warningsAndAbove).toHaveLength(2);
+      expect(warningsAndAbove).toContain("ECONNREFUSED");
+      expect(warningsAndAbove).toContain("Fatal crash");
+
+      const criticalOnly = filterErrorsBySeverity(errors, "critical");
+      expect(criticalOnly).toHaveLength(1);
+      expect(criticalOnly).toContain("Fatal crash");
+    });
+  });
+
+  describe("getErrorSummary", () => {
+    it("should provide correct summary statistics", () => {
+      const errors = [
+        "Command exited with code 1", // expected
+        "not-due", // expected
+        "deprecated API", // info
+        "ECONNREFUSED", // warning
+        "Fatal crash", // critical
+        "Unhandled rejection", // critical
+      ];
+
+      const summary = getErrorSummary(errors);
+
+      expect(summary.total).toBe(6);
+      expect(summary.bySeverity.expected).toBe(2);
+      expect(summary.bySeverity.info).toBe(1);
+      expect(summary.bySeverity.warning).toBe(1);
+      expect(summary.bySeverity.critical).toBe(2);
+      expect(summary.actionableCount).toBe(3); // warning + critical
+    });
+
+    it("should track categories correctly", () => {
+      const errors = ["ECONNREFUSED", "ETIMEDOUT", "socket hang up"];
+
+      const summary = getErrorSummary(errors);
+
+      expect(summary.byCategory.network).toBe(3);
     });
   });
 });

@@ -227,66 +227,414 @@ export async function getAggregatedStats(params?: {
 }
 
 /**
- * Error patterns that are expected behavior, not tool bugs.
- * These are filtered from error rate calculations.
+ * Error severity levels for classification.
  */
-const EXPECTED_ERROR_PATTERNS = [
-  /^Command exited with code \d+/i, // Non-zero exit codes (fixed pattern)
-  /^Command exited with non-zero status/i, // Alternative format (keep for compatibility)
-  /^ENOENT.*(?:\.env|\.git|node_modules)/i, // Expected missing files
-  /^not-due$/i, // Cron job not ready to run
-] as const;
+export type ErrorSeverity = "critical" | "warning" | "info" | "expected";
+
+/**
+ * Extended error metadata for better tracking.
+ */
+export type ErrorMetadata = {
+  severity: ErrorSeverity;
+  category: string;
+  isTransient: boolean;
+  suggestedAction?: string;
+  relatedPatterns?: string[];
+};
+
+/**
+ * Pattern definition with metadata for classification.
+ */
+type ErrorPatternDef = {
+  pattern: RegExp;
+  severity: ErrorSeverity;
+  category: string;
+  isTransient: boolean;
+  suggestedAction?: string;
+};
+
+/**
+ * Comprehensive error patterns with severity and metadata.
+ * Ordered by specificity (more specific patterns first).
+ */
+const ERROR_PATTERNS: ErrorPatternDef[] = [
+  // === EXPECTED BEHAVIOR (Not bugs) ===
+  {
+    pattern: /^Command exited with code \d+/i,
+    severity: "expected",
+    category: "shell",
+    isTransient: false,
+    suggestedAction: "Check command output for expected non-zero exit",
+  },
+  {
+    pattern: /^Command exited with non-zero status/i,
+    severity: "expected",
+    category: "shell",
+    isTransient: false,
+  },
+  {
+    pattern: /^ENOENT.*(?:\.env|\.git|node_modules|\.cache)/i,
+    severity: "expected",
+    category: "filesystem",
+    isTransient: false,
+    suggestedAction: "File intentionally not present",
+  },
+  {
+    pattern: /^not-due$/i,
+    severity: "expected",
+    category: "cron",
+    isTransient: false,
+  },
+  {
+    pattern: /no sessions found|session not found/i,
+    severity: "expected",
+    category: "session",
+    isTransient: false,
+  },
+  {
+    pattern: /already exists|duplicate/i,
+    severity: "expected",
+    category: "state",
+    isTransient: false,
+  },
+  {
+    pattern: /nothing to commit|no changes/i,
+    severity: "expected",
+    category: "git",
+    isTransient: false,
+  },
+  {
+    pattern: /rate limit|too many requests|429/i,
+    severity: "expected",
+    category: "api",
+    isTransient: true,
+    suggestedAction: "Retry with exponential backoff",
+  },
+
+  // === INFO (Minor issues, low priority) ===
+  {
+    pattern: /deprecated|will be removed/i,
+    severity: "info",
+    category: "deprecation",
+    isTransient: false,
+    suggestedAction: "Update to newer API when convenient",
+  },
+  {
+    pattern: /warning:|warn:/i,
+    severity: "info",
+    category: "warning",
+    isTransient: false,
+  },
+  {
+    pattern: /timeout.*(?:expected|normal)/i,
+    severity: "info",
+    category: "timeout",
+    isTransient: true,
+  },
+
+  // === WARNING (Should investigate) ===
+  {
+    pattern: /ECONNRESET|ECONNREFUSED|ETIMEDOUT/i,
+    severity: "warning",
+    category: "network",
+    isTransient: true,
+    suggestedAction: "Check network connectivity, retry operation",
+  },
+  {
+    pattern: /socket hang up|connection reset/i,
+    severity: "warning",
+    category: "network",
+    isTransient: true,
+    suggestedAction: "Retry with backoff",
+  },
+  {
+    pattern: /ENOMEM|out of memory/i,
+    severity: "warning",
+    category: "resource",
+    isTransient: true,
+    suggestedAction: "Check memory usage, consider cleanup",
+  },
+  {
+    pattern: /ENOSPC|no space left/i,
+    severity: "warning",
+    category: "resource",
+    isTransient: false,
+    suggestedAction: "Free disk space",
+  },
+  {
+    pattern: /permission denied|EACCES|EPERM/i,
+    severity: "warning",
+    category: "permissions",
+    isTransient: false,
+    suggestedAction: "Check file/directory permissions",
+  },
+  {
+    pattern: /authentication failed|unauthorized|401|403/i,
+    severity: "warning",
+    category: "auth",
+    isTransient: false,
+    suggestedAction: "Check credentials and tokens",
+  },
+  {
+    pattern: /not found.*(?:file|module|package)|404/i,
+    severity: "warning",
+    category: "notfound",
+    isTransient: false,
+    suggestedAction: "Verify path or resource exists",
+  },
+  {
+    pattern: /parse error|syntax error|unexpected token/i,
+    severity: "warning",
+    category: "syntax",
+    isTransient: false,
+    suggestedAction: "Fix syntax in source file",
+  },
+  {
+    pattern: /type error|TS\d{4}:/i,
+    severity: "warning",
+    category: "typescript",
+    isTransient: false,
+    suggestedAction: "Fix TypeScript type issues",
+  },
+
+  // === CRITICAL (Immediate attention) ===
+  {
+    pattern: /fatal|panic|crash|segfault/i,
+    severity: "critical",
+    category: "crash",
+    isTransient: false,
+    suggestedAction: "Investigate crash immediately, check logs",
+  },
+  {
+    pattern: /unhandled.*rejection|uncaught.*exception/i,
+    severity: "critical",
+    category: "unhandled",
+    isTransient: false,
+    suggestedAction: "Add error handling for this case",
+  },
+  {
+    pattern: /stack overflow|maximum call stack/i,
+    severity: "critical",
+    category: "recursion",
+    isTransient: false,
+    suggestedAction: "Fix infinite recursion",
+  },
+  {
+    pattern: /deadlock|hung|frozen/i,
+    severity: "critical",
+    category: "deadlock",
+    isTransient: false,
+    suggestedAction: "Check for blocking operations",
+  },
+  {
+    pattern: /data corruption|integrity|checksum/i,
+    severity: "critical",
+    category: "data",
+    isTransient: false,
+    suggestedAction: "Verify data integrity, restore from backup if needed",
+  },
+  {
+    pattern: /security|vulnerability|exploit/i,
+    severity: "critical",
+    category: "security",
+    isTransient: false,
+    suggestedAction: "Address security issue immediately",
+  },
+];
+
+/**
+ * Legacy: Error patterns that are expected behavior (kept for backward compatibility).
+ * Use classifyError() for new code.
+ */
+const EXPECTED_ERROR_PATTERNS = ERROR_PATTERNS.filter((p) => p.severity === "expected").map(
+  (p) => p.pattern,
+) as unknown as readonly RegExp[];
+
+/**
+ * Classify an error message and return its metadata.
+ */
+export function classifyError(errorMessage: string): ErrorMetadata {
+  for (const def of ERROR_PATTERNS) {
+    if (def.pattern.test(errorMessage)) {
+      return {
+        severity: def.severity,
+        category: def.category,
+        isTransient: def.isTransient,
+        suggestedAction: def.suggestedAction,
+        relatedPatterns: [def.pattern.source],
+      };
+    }
+  }
+
+  // Default: unknown errors are warnings
+  return {
+    severity: "warning",
+    category: "unknown",
+    isTransient: false,
+    suggestedAction: "Investigate error message",
+  };
+}
+
+/**
+ * Check if an error is expected (not a bug).
+ */
+export function isExpectedError(errorMessage: string): boolean {
+  const meta = classifyError(errorMessage);
+  return meta.severity === "expected";
+}
+
+/**
+ * Filter errors by severity level.
+ */
+export function filterErrorsBySeverity(errors: string[], minSeverity: ErrorSeverity): string[] {
+  const severityOrder: Record<ErrorSeverity, number> = {
+    expected: 0,
+    info: 1,
+    warning: 2,
+    critical: 3,
+  };
+  const minLevel = severityOrder[minSeverity];
+
+  return errors.filter((err) => {
+    const meta = classifyError(err);
+    return severityOrder[meta.severity] >= minLevel;
+  });
+}
+
+/**
+ * Get error summary statistics.
+ */
+export function getErrorSummary(errors: string[]): {
+  total: number;
+  bySeverity: Record<ErrorSeverity, number>;
+  byCategory: Record<string, number>;
+  actionableCount: number;
+} {
+  const bySeverity: Record<ErrorSeverity, number> = {
+    critical: 0,
+    warning: 0,
+    info: 0,
+    expected: 0,
+  };
+  const byCategory: Record<string, number> = {};
+  let actionableCount = 0;
+
+  for (const err of errors) {
+    const meta = classifyError(err);
+    bySeverity[meta.severity]++;
+    byCategory[meta.category] = (byCategory[meta.category] ?? 0) + 1;
+    if (meta.severity !== "expected" && meta.severity !== "info") {
+      actionableCount++;
+    }
+  }
+
+  return {
+    total: errors.length,
+    bySeverity,
+    byCategory,
+    actionableCount,
+  };
+}
+
+/**
+ * Extended tool error stats with severity breakdown.
+ */
+export type ToolErrorStats = {
+  toolName: string;
+  errorRate: number;
+  totalCalls: number;
+  errorCount: number;
+  bySeverity: Record<ErrorSeverity, number>;
+  topCategories: Array<{ category: string; count: number }>;
+};
 
 /**
  * Get tool error rates from telemetry data.
  * Returns tools with error rates above the threshold (default 20%).
+ * Now uses enhanced error classification for better false positive filtering.
  */
 export async function getToolErrorRates(params?: {
   statsDir?: string;
   threshold?: number; // Error rate threshold (0.0 - 1.0), default 0.2 (20%)
   minCalls?: number; // Minimum tool calls to consider, default 5
-}): Promise<
-  Array<{ toolName: string; errorRate: number; totalCalls: number; errorCount: number }>
-> {
+  minSeverity?: ErrorSeverity; // Minimum severity to count as error (default: "warning")
+  includeDetails?: boolean; // Include severity breakdown (default: false)
+}): Promise<ToolErrorStats[]> {
   const threshold = params?.threshold ?? 0.2;
   const minCalls = params?.minCalls ?? 5;
+  const minSeverity = params?.minSeverity ?? "warning";
+  const includeDetails = params?.includeDetails ?? false;
   const allStats = await readSessionStats({ statsDir: params?.statsDir });
 
-  // Aggregate tool errors across all sessions
-  const toolStats = new Map<string, { calls: number; errors: number }>();
+  const severityOrder: Record<ErrorSeverity, number> = {
+    expected: 0,
+    info: 1,
+    warning: 2,
+    critical: 3,
+  };
+  const minLevel = severityOrder[minSeverity];
+
+  // Aggregate tool errors across all sessions with detailed tracking
+  const toolStats = new Map<
+    string,
+    {
+      calls: number;
+      errors: number;
+      bySeverity: Record<ErrorSeverity, number>;
+      byCategory: Record<string, number>;
+    }
+  >();
 
   for (const stat of allStats) {
     if (stat.toolErrors) {
       for (const [toolName, errorInfo] of Object.entries(stat.toolErrors)) {
-        const existing = toolStats.get(toolName) ?? { calls: 0, errors: 0 };
+        const existing = toolStats.get(toolName) ?? {
+          calls: 0,
+          errors: 0,
+          bySeverity: { critical: 0, warning: 0, info: 0, expected: 0 },
+          byCategory: {},
+        };
         existing.calls += errorInfo.count;
-        // Filter out expected errors that aren't actual bugs
-        const actualErrors = errorInfo.errors.filter((errMsg) => {
-          return !EXPECTED_ERROR_PATTERNS.some((pattern) => pattern.test(errMsg));
-        });
-        existing.errors += actualErrors.length;
+
+        // Classify each error and track by severity
+        for (const errMsg of errorInfo.errors) {
+          const meta = classifyError(errMsg);
+          existing.bySeverity[meta.severity]++;
+          existing.byCategory[meta.category] = (existing.byCategory[meta.category] ?? 0) + 1;
+
+          // Only count as actionable error if meets minimum severity
+          if (severityOrder[meta.severity] >= minLevel) {
+            existing.errors++;
+          }
+        }
+
         toolStats.set(toolName, existing);
       }
     }
   }
 
   // Calculate error rates and filter by threshold
-  const hotspots: Array<{
-    toolName: string;
-    errorRate: number;
-    totalCalls: number;
-    errorCount: number;
-  }> = [];
+  const hotspots: ToolErrorStats[] = [];
 
   for (const [toolName, stats] of toolStats.entries()) {
     if (stats.calls >= minCalls) {
       const errorRate = stats.errors / stats.calls;
       if (errorRate >= threshold) {
+        // Get top categories
+        const topCategories = Object.entries(stats.byCategory)
+          .map(([category, count]) => ({ category, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3);
+
         hotspots.push({
           toolName,
           errorRate,
           totalCalls: stats.calls,
           errorCount: stats.errors,
+          bySeverity: includeDetails
+            ? stats.bySeverity
+            : { critical: 0, warning: 0, info: 0, expected: 0 },
+          topCategories: includeDetails ? topCategories : [],
         });
       }
     }
