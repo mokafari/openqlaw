@@ -32,6 +32,7 @@ export type ToolSurfaceMetadata = {
   preconditions: string[]; // Required state before use
   sideEffects: string[]; // State changes after use
   reachabilityEdges?: string[]; // Context transitions this enables
+  requiredCapabilities?: string[]; // Named capabilities required (e.g., "CanBuild", "CanTest")
 };
 
 export type ClusterId =

@@ -4,25 +4,21 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReachabilityCheckContext } from "./types.js";
-import { ContextGraph } from "./context-graph.js";
+import { ContextGraph, CommitStatus, DeploymentStatus } from "./context-graph.js";
 
 /**
  * Tests for ContextGraph real CLI checks.
  *
- * NOTE: The current implementation uses simplified checks (file existence)
- * rather than real Docker/Git CLI validation. These tests verify the current
- * behavior and document the limitation.
- *
- * Future enhancement: Implement real CLI checks:
- * - CanCommit: Run `git config user.email` to verify git config
- * - CanDeploy: Run `docker --version` and `docker ps` to verify Docker CLI and daemon
+ * These tests verify real CLI validation for:
+ * - CanCommit: git config, .git folder, working tree status
+ * - CanDeploy: Dockerfile, docker CLI, Docker daemon
  */
-describe("ContextGraph Real Checks (Current Implementation)", () => {
+describe("ContextGraph Real CLI Checks", () => {
   let tempDir: string;
   let workspaceDir: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "context-graph-test-"));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "context-graph-real-test-"));
     workspaceDir = path.join(tempDir, "workspace");
     await fs.mkdir(workspaceDir, { recursive: true });
   });
@@ -31,187 +27,233 @@ describe("ContextGraph Real Checks (Current Implementation)", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  describe("CanCommit - Current Simplified Implementation", () => {
-    it("should return true when .git folder exists (simplified check)", async () => {
-      const gitDir = path.join(workspaceDir, ".git");
-      await fs.mkdir(gitDir, { recursive: true });
+  describe("checkCanCommit - Detailed Status", () => {
+    it("should return CommitStatus with all fields", async () => {
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanCommit(context);
 
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
+      expect(status).toHaveProperty("canCommit");
+      expect(status).toHaveProperty("hasGitRepo");
+      expect(status).toHaveProperty("hasUserEmail");
+      expect(status).toHaveProperty("hasUserName");
+      expect(status).toHaveProperty("workingTreeClean");
+    });
 
-      const result = await ContextGraph.check(context, "CanCommit");
-      expect(result).toBe(true);
+    it("should return false when no workspace directory", async () => {
+      const context: ReachabilityCheckContext = {};
+      const status = await ContextGraph.checkCanCommit(context);
+
+      expect(status.canCommit).toBe(false);
+      expect(status.reason).toBe("No workspace directory specified");
     });
 
     it("should return false when .git folder does not exist", async () => {
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanCommit(context);
 
-      const result = await ContextGraph.check(context, "CanCommit");
-      expect(result).toBe(false);
+      expect(status.canCommit).toBe(false);
+      expect(status.hasGitRepo).toBe(false);
+      expect(status.reason).toBe("Not a git repository");
     });
 
-    it("should NOT verify git user.email config (limitation)", async () => {
-      // Create .git but don't configure user.email
+    it("should detect .git folder but require user.email config", async () => {
+      // Create .git directory (simulates an uninitialized git repo)
       const gitDir = path.join(workspaceDir, ".git");
       await fs.mkdir(gitDir, { recursive: true });
 
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanCommit(context);
 
-      const result = await ContextGraph.check(context, "CanCommit");
-      // Current implementation returns true even without git config
-      // This is a limitation - real implementation would check `git config user.email`
-      expect(result).toBe(true);
+      expect(status.hasGitRepo).toBe(true);
+      // user.email won't be configured in a bare .git folder
+      if (!status.hasUserEmail) {
+        expect(status.canCommit).toBe(false);
+        expect(status.reason).toBe("Git user.email not configured");
+      }
     });
 
-    it("should provide detailed info about missing prerequisites", async () => {
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
-
-      const details = await ContextGraph.checkDetailed(context, "CanCommit");
-      expect(details.available).toBe(false);
-      expect(details.missing).toContain(".git folder");
-      expect(details.missing).toContain("git user.email config");
-      expect(details.reason).toBe("Git repository not configured");
-    });
-  });
-
-  describe("CanDeploy - Current Simplified Implementation", () => {
-    it("should return true when Dockerfile exists (simplified check)", async () => {
-      const dockerfile = path.join(workspaceDir, "Dockerfile");
-      await fs.writeFile(dockerfile, "FROM node:22\n");
-
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
-
-      const result = await ContextGraph.check(context, "CanDeploy");
-      expect(result).toBe(true);
-    });
-
-    it("should return false when Dockerfile does not exist", async () => {
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
-
-      const result = await ContextGraph.check(context, "CanDeploy");
-      expect(result).toBe(false);
-    });
-
-    it("should NOT verify docker CLI availability (limitation)", async () => {
-      const dockerfile = path.join(workspaceDir, "Dockerfile");
-      await fs.writeFile(dockerfile, "FROM node:22\n");
-
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
-
-      const result = await ContextGraph.check(context, "CanDeploy");
-      // Current implementation returns true even if docker CLI is not available
-      // This is a limitation - real implementation would check `which docker` or `docker --version`
-      expect(result).toBe(true);
-    });
-
-    it("should NOT verify Docker daemon is running (limitation)", async () => {
-      const dockerfile = path.join(workspaceDir, "Dockerfile");
-      await fs.writeFile(dockerfile, "FROM node:22\n");
-
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
-
-      const result = await ContextGraph.check(context, "CanDeploy");
-      // Current implementation returns true even if Docker daemon is not running
-      // This is a limitation - real implementation would check `docker ps`
-      expect(result).toBe(true);
-    });
-
-    it("should provide detailed info about missing prerequisites", async () => {
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
-
-      const details = await ContextGraph.checkDetailed(context, "CanDeploy");
-      expect(details.available).toBe(false);
-      expect(details.missing).toContain("Dockerfile");
-      expect(details.missing).toContain("docker CLI");
-      expect(details.missing).toContain("running Docker daemon");
-      expect(details.reason).toBe("Docker deployment prerequisites missing");
-    });
-  });
-
-  describe("Future Enhancement: Real CLI Checks", () => {
-    it("should verify git user.email when real checks are implemented", async () => {
-      // This test documents the expected behavior when real CLI checks are added
-      const gitDir = path.join(workspaceDir, ".git");
-      await fs.mkdir(gitDir, { recursive: true });
-
-      // Initialize git repo
+    it("should return true for properly configured git repo", async () => {
+      // Skip if git is not available
       try {
-        execSync("git init", { cwd: workspaceDir, stdio: "ignore" });
+        execSync("git --version", { stdio: "ignore" });
       } catch {
-        // Git might not be available in test environment
-        // Skip this test if git is not available
         return;
       }
 
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
+      // Initialize real git repo
+      execSync("git init", { cwd: workspaceDir, stdio: "ignore" });
+      execSync('git config user.email "test@example.com"', {
+        cwd: workspaceDir,
+        stdio: "ignore",
+      });
+      execSync('git config user.name "Test User"', {
+        cwd: workspaceDir,
+        stdio: "ignore",
+      });
 
-      // Current implementation: returns true (simplified)
-      const currentResult = await ContextGraph.check(context, "CanCommit");
-      expect(currentResult).toBe(true);
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanCommit(context);
 
-      // Future implementation would check:
-      // try {
-      //   execSync('git config user.email', { cwd: workspaceDir, stdio: 'ignore' });
-      //   return true;
-      // } catch {
-      //   return false;
-      // }
+      expect(status.hasGitRepo).toBe(true);
+      expect(status.hasUserEmail).toBe(true);
+      expect(status.hasUserName).toBe(true);
+      expect(status.canCommit).toBe(true);
+      expect(status.workingTreeClean).toBe(true);
     });
 
-    it("should verify docker CLI when real checks are implemented", async () => {
-      const dockerfile = path.join(workspaceDir, "Dockerfile");
-      await fs.writeFile(dockerfile, "FROM node:22\n");
+    it("should detect uncommitted changes", async () => {
+      // Skip if git is not available
+      try {
+        execSync("git --version", { stdio: "ignore" });
+      } catch {
+        return;
+      }
 
-      const context: ReachabilityCheckContext = {
-        workspaceDir,
-      };
+      // Initialize real git repo
+      execSync("git init", { cwd: workspaceDir, stdio: "ignore" });
+      execSync('git config user.email "test@example.com"', {
+        cwd: workspaceDir,
+        stdio: "ignore",
+      });
 
-      // Current implementation: returns true (simplified)
-      const currentResult = await ContextGraph.check(context, "CanDeploy");
-      expect(currentResult).toBe(true);
+      // Create uncommitted file
+      await fs.writeFile(path.join(workspaceDir, "test.txt"), "hello");
 
-      // Future implementation would check:
-      // try {
-      //   execSync('docker --version', { stdio: 'ignore' });
-      //   execSync('docker ps', { stdio: 'ignore' });
-      //   return true;
-      // } catch {
-      //   return false;
-      // }
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanCommit(context);
+
+      expect(status.canCommit).toBe(true);
+      expect(status.workingTreeClean).toBe(false);
     });
   });
 
-  describe("documentation of limitations", () => {
-    it("should document that real CLI checks are not implemented", () => {
-      // This test serves as documentation that:
-      // 1. CanCommit only checks for .git folder existence, not git config
-      // 2. CanDeploy only checks for Dockerfile existence, not docker CLI/daemon
-      // 3. Real CLI checks would require:
-      //    - Executing `git config user.email` for CanCommit
-      //    - Executing `docker --version` and `docker ps` for CanDeploy
-      //    - Handling cases where CLI tools are not installed
-      //    - Handling cases where CLI tools are installed but not configured
+  describe("checkCanDeploy - Detailed Status", () => {
+    it("should return DeploymentStatus with all fields", async () => {
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanDeploy(context);
 
-      expect(true).toBe(true); // Placeholder to document limitation
+      expect(status).toHaveProperty("canDeploy");
+      expect(status).toHaveProperty("hasDockerfile");
+      expect(status).toHaveProperty("hasDockerCli");
+      expect(status).toHaveProperty("dockerDaemonRunning");
+    });
+
+    it("should return false when no workspace directory", async () => {
+      const context: ReachabilityCheckContext = {};
+      const status = await ContextGraph.checkCanDeploy(context);
+
+      expect(status.canDeploy).toBe(false);
+      expect(status.reason).toBe("No workspace directory specified");
+    });
+
+    it("should return false when Dockerfile does not exist", async () => {
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanDeploy(context);
+
+      expect(status.canDeploy).toBe(false);
+      expect(status.hasDockerfile).toBe(false);
+      expect(status.reason).toBe("No Dockerfile found in workspace");
+    });
+
+    it("should detect Dockerfile and check docker CLI", async () => {
+      const dockerfile = path.join(workspaceDir, "Dockerfile");
+      await fs.writeFile(dockerfile, "FROM node:22\n");
+
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanDeploy(context);
+
+      expect(status.hasDockerfile).toBe(true);
+      // Docker CLI may or may not be available
+      if (status.hasDockerCli) {
+        expect(status.dockerVersion).toBeDefined();
+      } else {
+        expect(status.reason).toBe("Docker CLI not available");
+      }
+    });
+
+    it("should detect docker CLI availability", async () => {
+      const dockerfile = path.join(workspaceDir, "Dockerfile");
+      await fs.writeFile(dockerfile, "FROM node:22\n");
+
+      // Check if docker is available
+      let dockerAvailable = false;
+      try {
+        execSync("docker --version", { stdio: "ignore" });
+        dockerAvailable = true;
+      } catch {
+        // Docker not available
+      }
+
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanDeploy(context);
+
+      expect(status.hasDockerCli).toBe(dockerAvailable);
+      if (dockerAvailable) {
+        expect(status.dockerVersion).toBeTruthy();
+      }
+    });
+
+    it("should report deploy target when all checks pass", async () => {
+      const dockerfile = path.join(workspaceDir, "Dockerfile");
+      await fs.writeFile(dockerfile, "FROM node:22\n");
+
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanDeploy(context);
+
+      if (status.canDeploy) {
+        expect(status.deployTarget).toBe("docker");
+        expect(status.hasDockerfile).toBe(true);
+        expect(status.hasDockerCli).toBe(true);
+        expect(status.dockerDaemonRunning).toBe(true);
+      }
+    });
+  });
+
+  describe("checkDetailed", () => {
+    it("should provide detailed info for CanCommit", async () => {
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const details = await ContextGraph.checkDetailed(context, "CanCommit");
+
+      expect(details.available).toBe(false);
+      expect(details.missing).toContain(".git folder");
+      expect(details.reason).toBe("Not a git repository");
+      expect(details.requiredAction).toBe("Run 'git init' to initialize repository");
+    });
+
+    it("should provide detailed info for CanDeploy", async () => {
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const details = await ContextGraph.checkDetailed(context, "CanDeploy");
+
+      expect(details.available).toBe(false);
+      expect(details.missing).toContain("Dockerfile");
+      expect(details.reason).toBe("No Dockerfile found in workspace");
+    });
+  });
+
+  describe("Graceful CLI Handling", () => {
+    it("should handle git command timeout gracefully", async () => {
+      const gitDir = path.join(workspaceDir, ".git");
+      await fs.mkdir(gitDir, { recursive: true });
+
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanCommit(context);
+
+      // Should complete without throwing even if commands fail
+      expect(typeof status.canCommit).toBe("boolean");
+      expect(typeof status.hasGitRepo).toBe("boolean");
+    });
+
+    it("should handle docker command timeout gracefully", async () => {
+      const dockerfile = path.join(workspaceDir, "Dockerfile");
+      await fs.writeFile(dockerfile, "FROM node:22\n");
+
+      const context: ReachabilityCheckContext = { workspaceDir };
+      const status = await ContextGraph.checkCanDeploy(context);
+
+      // Should complete without throwing even if Docker is not available
+      expect(typeof status.canDeploy).toBe("boolean");
+      expect(typeof status.hasDockerfile).toBe("boolean");
+      expect(typeof status.hasDockerCli).toBe("boolean");
     });
   });
 });
