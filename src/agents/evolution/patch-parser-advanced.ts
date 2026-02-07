@@ -238,8 +238,9 @@ export function parseApplyPatchFormat(content: string): ParsedPatch {
         context: [],
         removals: [],
         additions: [],
-        rawLines: [],
+        rawLines: [line],
       };
+      // Continue to process content lines (lines starting with +)
       continue;
     }
 
@@ -317,6 +318,16 @@ export function parseApplyPatchFormat(content: string): ParsedPatch {
         currentHunk.context.push(line.substring(1));
         currentHunk.oldLines++;
         currentHunk.newLines++;
+      } else if (line.trim() === "" || line.startsWith("***")) {
+        // Empty line or new directive - stop processing this hunk
+        // For Add File, we want to collect all + lines until we hit a non-+ line
+        if (currentFile.isNew && line.trim() !== "" && !line.startsWith("+")) {
+          // End of Add File content
+          if (currentHunk.additions.length > 0) {
+            currentFile.hunks.push(currentHunk);
+            currentHunk = null;
+          }
+        }
       }
     }
   }
@@ -490,21 +501,51 @@ export async function detectConflicts(
         }
       }
 
-      if (!matches) {
-        // Check if already applied
-        const expectedNew: string[] = [];
-        for (const raw of hunk.rawLines) {
-          if (raw.startsWith(" ") || raw.startsWith("+")) {
-            expectedNew.push(raw.substring(1));
-          }
+      // Build expected new content (context + additions)
+      const expectedNew: string[] = [];
+      for (const raw of hunk.rawLines) {
+        if (raw.startsWith(" ") || raw.startsWith("+")) {
+          expectedNew.push(raw.substring(1));
         }
+      }
 
+      // Check if patch is already applied (the resulting new content is already in the file)
+      // This check applies whether or not the old content matches
+      if (startLine + expectedNew.length <= fileLines.length) {
         let alreadyApplied = true;
         for (let i = 0; i < expectedNew.length; i++) {
           if (fileLines[startLine + i] !== expectedNew[i]) {
             alreadyApplied = false;
             break;
           }
+        }
+
+        if (alreadyApplied) {
+          conflicts.push({
+            file: file.oldPath || file.newPath,
+            hunkIndex: hunkIdx,
+            type: "already_applied",
+            description: `Hunk ${hunkIdx + 1} appears to be already applied`,
+          });
+          continue; // Skip to next hunk
+        }
+      }
+
+      if (!matches) {
+        // Check if already applied by checking if the new content (additions) are already present
+        // (expectedNew was already built above)
+
+        // Check if the new content matches at the expected position
+        let alreadyApplied = true;
+        if (startLine + expectedNew.length <= fileLines.length) {
+          for (let i = 0; i < expectedNew.length; i++) {
+            if (fileLines[startLine + i] !== expectedNew[i]) {
+              alreadyApplied = false;
+              break;
+            }
+          }
+        } else {
+          alreadyApplied = false;
         }
 
         if (alreadyApplied) {
@@ -621,33 +662,65 @@ export function findFuzzyMatch(
   const maxOffset = options?.maxOffset ?? 50;
   const minSimilarity = options?.minSimilarity ?? 0.8;
 
-  // Build expected context (lines that should exist)
-  // If rawLines is available, use it; otherwise fall back to context + removals
+  // Build expected context (lines that should exist for matching)
+  // Priority: context lines (unchanged) for matching, fall back to removals only if no context
   let expectedLines: string[] = [];
+  let removalLines: string[] = [];
 
   if (hunk.rawLines && hunk.rawLines.length > 0) {
     for (const raw of hunk.rawLines) {
       // Skip header lines starting with @@
       if (raw.startsWith("@@")) continue;
-      if (raw.startsWith(" ") || raw.startsWith("-")) {
+      // Collect context lines (space prefix) - preferred for matching
+      if (raw.startsWith(" ")) {
         expectedLines.push(raw.substring(1));
       }
+      // Collect removal lines separately (minus prefix)
+      if (raw.startsWith("-")) {
+        removalLines.push(raw.substring(1));
+      }
     }
-  } else {
-    // Fall back to context + removals
-    expectedLines = [...hunk.context, ...hunk.removals];
+  }
+
+  // Fall back to hunk.context array if rawLines gave no context
+  if (expectedLines.length === 0 && hunk.context && hunk.context.length > 0) {
+    expectedLines = [...hunk.context];
+  }
+
+  // If still no context, fall back to removals
+  if (expectedLines.length === 0) {
+    if (removalLines.length > 0) {
+      expectedLines = removalLines;
+    } else if (hunk.removals && hunk.removals.length > 0) {
+      expectedLines = [...hunk.removals];
+    }
   }
 
   if (expectedLines.length === 0) {
     return { offset: 0, similarity: 1 };
   }
 
-  let bestOffset = 0;
-  let bestSimilarity = 0;
+  let bestOffset: number | null = null;
+  let bestSimilarity = -1;
 
   // Search around the expected position
   const expectedStart = hunk.oldStart - 1;
 
+  // First, check for exact match at position 0 (most common case)
+  if (expectedStart >= 0 && expectedStart + expectedLines.length <= fileLines.length) {
+    let exactMatch = true;
+    for (let i = 0; i < expectedLines.length; i++) {
+      if (fileLines[expectedStart + i] !== expectedLines[i]) {
+        exactMatch = false;
+        break;
+      }
+    }
+    if (exactMatch) {
+      return { offset: 0, similarity: 1 };
+    }
+  }
+
+  // If no exact match, try fuzzy matching
   for (let offset = -maxOffset; offset <= maxOffset; offset++) {
     const startPos = expectedStart + offset;
     if (startPos < 0 || startPos + expectedLines.length > fileLines.length) {
@@ -661,14 +734,14 @@ export function findFuzzyMatch(
     }
     const avgSimilarity = totalSimilarity / expectedLines.length;
 
-    // Update best match (including when avgSimilarity = 0 on first iteration)
-    if (avgSimilarity > bestSimilarity || bestSimilarity === 0) {
+    // Update best match
+    if (avgSimilarity > bestSimilarity) {
       bestSimilarity = avgSimilarity;
       bestOffset = offset;
     }
   }
 
-  if (bestSimilarity > 0 && bestSimilarity >= minSimilarity) {
+  if (bestOffset !== null && bestSimilarity >= minSimilarity) {
     return { offset: bestOffset, similarity: bestSimilarity };
   }
 
