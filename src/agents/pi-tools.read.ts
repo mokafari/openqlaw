@@ -491,10 +491,22 @@ export function createOpenClawReadTool(base: AnyAgentTool, root?: string): AnyAg
         }
       }
 
-      const result = await base.execute(toolCallId, normalized ?? params, signal);
-      const resolvedPath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
-      const normalizedResult = await normalizeReadImageResult(result, resolvedPath);
-      return sanitizeToolResultImages(normalizedResult, `read:${resolvedPath}`);
+      try {
+        const result = await base.execute(toolCallId, normalized ?? params, signal);
+        const resolvedPath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
+        const normalizedResult = await normalizeReadImageResult(result, resolvedPath);
+        return sanitizeToolResultImages(normalizedResult, `read:${resolvedPath}`);
+      } catch (err) {
+        // Convert raw EISDIR errors to user-friendly message
+        // This catches edge cases where the pre-check stat() fails but base.execute() hits EISDIR
+        // (e.g., race conditions, path normalization differences, permission issues during stat)
+        if (err instanceof Error && err.message.includes("EISDIR")) {
+          throw new Error(
+            `Cannot read '${rawPath}': path is a directory. Use 'ls' or 'find' to list directory contents, or specify a file path.`,
+          );
+        }
+        throw err;
+      }
     },
   };
 }
