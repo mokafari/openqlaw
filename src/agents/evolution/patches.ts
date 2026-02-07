@@ -2,6 +2,16 @@ import { promises as fs } from "fs";
 import crypto from "node:crypto";
 import path from "path";
 import { resolveStateDir } from "../../config/paths.js";
+import {
+  parseApplyPatchFormat,
+  parsePatch,
+  detectConflicts,
+  applyPatchAdvanced,
+  analyzePatchSemantics,
+  type ParsedPatch,
+  type PatchConflict,
+  type PatchApplicationResult,
+} from "./patch-parser-advanced.js";
 
 export type PatchStatus = "pending" | "applied" | "reverted" | "failed";
 
@@ -26,6 +36,22 @@ export type PatchMetadata = {
     error?: string;
   };
   error?: string;
+  // Advanced parser metadata
+  semantics?: {
+    type: "feature" | "bugfix" | "refactor" | "config" | "test" | "unknown";
+    affectedModules: string[];
+    complexity: "low" | "medium" | "high";
+    riskLevel: "low" | "medium" | "high";
+  };
+  applicationResult?: {
+    fuzzyMatches: Array<{
+      file: string;
+      hunkIndex: number;
+      offset: number;
+      similarity: number;
+    }>;
+    conflicts: PatchConflict[];
+  };
 };
 
 export type Patch = {
@@ -196,13 +222,27 @@ export async function getAppliedPatchesForFile(
 }
 
 /**
- * Apply a patch to the codebase.
- * This is a wrapper that validates and applies the patch using the apply_patch tool.
+ * Apply a patch to the codebase using the advanced parser.
+ * Features:
+ * - Conflict detection before application
+ * - Fuzzy matching for better success rates
+ * - Semantic analysis of patch content
  */
 export async function applyPatchToCodebase(
   patchId: string,
   workspaceDir: string,
-): Promise<{ success: boolean; error?: string }> {
+  options?: {
+    fuzzyMatch?: boolean;
+    maxFuzzyOffset?: number;
+    dryRun?: boolean;
+    skipConflictCheck?: boolean;
+  },
+): Promise<{
+  success: boolean;
+  error?: string;
+  conflicts?: PatchConflict[];
+  applicationResult?: PatchApplicationResult;
+}> {
   const patch = await loadPatch(patchId);
   if (!patch) {
     return { success: false, error: `Patch ${patchId} not found` };
@@ -213,14 +253,84 @@ export async function applyPatchToCodebase(
   }
 
   try {
-    // Import apply_patch function
-    const { applyPatch } = await import("../../agents/apply-patch.js");
-    await applyPatch(patch.content, {
-      cwd: workspaceDir,
+    // Parse the patch using the advanced parser
+    const parsedPatch = patch.content.includes("*** Begin Patch")
+      ? parseApplyPatchFormat(patch.content)
+      : parsePatch(patch.content);
+
+    // Run conflict detection unless skipped
+    if (!options?.skipConflictCheck) {
+      const conflicts = await detectConflicts(parsedPatch, workspaceDir);
+      const blockingConflicts = conflicts.filter((c) => c.type !== "already_applied");
+
+      if (blockingConflicts.length > 0) {
+        await updatePatchStatus(patchId, "failed", {
+          error: `Conflicts detected: ${blockingConflicts.map((c) => c.description).join("; ")}`,
+        });
+        return {
+          success: false,
+          error: "Patch has conflicts that prevent application",
+          conflicts: blockingConflicts,
+        };
+      }
+
+      // If all hunks are already applied, mark as applied without error
+      const alreadyApplied = conflicts.filter((c) => c.type === "already_applied");
+      if (alreadyApplied.length > 0 && alreadyApplied.length === conflicts.length) {
+        await updatePatchStatus(patchId, "applied", {
+          applicationResult: {
+            fuzzyMatches: [],
+            conflicts: alreadyApplied,
+          },
+        });
+        return {
+          success: true,
+          conflicts: alreadyApplied,
+          applicationResult: {
+            success: true,
+            applied: [],
+            failed: [],
+            conflicts: alreadyApplied,
+            fuzzyMatches: [],
+          },
+        };
+      }
+    }
+
+    // Apply the patch with fuzzy matching
+    const result = await applyPatchAdvanced(parsedPatch, workspaceDir, {
+      dryRun: options?.dryRun,
+      fuzzyMatch: options?.fuzzyMatch ?? true,
+      maxFuzzyOffset: options?.maxFuzzyOffset ?? 30,
     });
 
-    await updatePatchStatus(patchId, "applied");
-    return { success: true };
+    if (result.success) {
+      // Analyze semantics for metadata
+      const semantics = analyzePatchSemantics(parsedPatch);
+
+      await updatePatchStatus(patchId, "applied", {
+        semantics,
+        applicationResult: {
+          fuzzyMatches: result.fuzzyMatches,
+          conflicts: result.conflicts,
+        },
+      });
+      return { success: true, applicationResult: result };
+    } else {
+      await updatePatchStatus(patchId, "failed", {
+        error: `Application failed: ${result.conflicts.map((c) => c.description).join("; ")}`,
+        applicationResult: {
+          fuzzyMatches: result.fuzzyMatches,
+          conflicts: result.conflicts,
+        },
+      });
+      return {
+        success: false,
+        error: "Patch application failed",
+        conflicts: result.conflicts,
+        applicationResult: result,
+      };
+    }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     await updatePatchStatus(patchId, "failed", { error });
@@ -231,12 +341,21 @@ export async function applyPatchToCodebase(
 /**
  * Apply an approved patch (already validated by Dojo) to the codebase.
  * Works with patches in "applied" or "pending" status.
- * Returns success even if patch.metadata.status !== "pending" (it's already approved).
+ * Uses the advanced parser with fuzzy matching for better success rates.
  */
 export async function applyApprovedPatchToCodebase(
   patchId: string,
   workspaceDir: string,
-): Promise<{ success: boolean; error?: string }> {
+  options?: {
+    fuzzyMatch?: boolean;
+    maxFuzzyOffset?: number;
+  },
+): Promise<{
+  success: boolean;
+  error?: string;
+  conflicts?: PatchConflict[];
+  applicationResult?: PatchApplicationResult;
+}> {
   const patch = await loadPatch(patchId);
   if (!patch) {
     return { success: false, error: `Patch ${patchId} not found` };
@@ -258,18 +377,79 @@ export async function applyApprovedPatchToCodebase(
   }
 
   try {
-    // Import apply_patch function
-    const { applyPatch } = await import("../../agents/apply-patch.js");
-    await applyPatch(patch.content, {
-      cwd: workspaceDir,
-    });
+    // Parse the patch using the advanced parser
+    const parsedPatch = patch.content.includes("*** Begin Patch")
+      ? parseApplyPatchFormat(patch.content)
+      : parsePatch(patch.content);
 
-    // Mark as applied if it was pending
-    if (patch.metadata.status === "pending") {
-      await updatePatchStatus(patchId, "applied");
+    // Run conflict detection
+    const conflicts = await detectConflicts(parsedPatch, workspaceDir);
+    const blockingConflicts = conflicts.filter((c) => c.type !== "already_applied");
+
+    // Check if patch is already applied
+    const alreadyApplied = conflicts.filter((c) => c.type === "already_applied");
+    if (alreadyApplied.length > 0 && blockingConflicts.length === 0) {
+      // Patch appears to be already applied
+      if (patch.metadata.status === "pending") {
+        await updatePatchStatus(patchId, "applied", {
+          applicationResult: {
+            fuzzyMatches: [],
+            conflicts: alreadyApplied,
+          },
+        });
+      }
+      return {
+        success: true,
+        conflicts: alreadyApplied,
+        applicationResult: {
+          success: true,
+          applied: [],
+          failed: [],
+          conflicts: alreadyApplied,
+          fuzzyMatches: [],
+        },
+      };
     }
 
-    return { success: true };
+    // Apply the patch with fuzzy matching
+    const result = await applyPatchAdvanced(parsedPatch, workspaceDir, {
+      fuzzyMatch: options?.fuzzyMatch ?? true,
+      maxFuzzyOffset: options?.maxFuzzyOffset ?? 30,
+    });
+
+    if (result.success) {
+      // Analyze semantics for metadata
+      const semantics = analyzePatchSemantics(parsedPatch);
+
+      // Mark as applied if it was pending
+      if (patch.metadata.status === "pending") {
+        await updatePatchStatus(patchId, "applied", {
+          semantics,
+          applicationResult: {
+            fuzzyMatches: result.fuzzyMatches,
+            conflicts: result.conflicts,
+          },
+        });
+      }
+      return { success: true, applicationResult: result };
+    } else {
+      // Don't mark as failed if it was already applied
+      if (patch.metadata.status === "pending") {
+        await updatePatchStatus(patchId, "failed", {
+          error: `Application failed: ${result.conflicts.map((c) => c.description).join("; ")}`,
+          applicationResult: {
+            fuzzyMatches: result.fuzzyMatches,
+            conflicts: result.conflicts,
+          },
+        });
+      }
+      return {
+        success: false,
+        error: "Patch application failed",
+        conflicts: result.conflicts,
+        applicationResult: result,
+      };
+    }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Don't mark as failed if it was already applied
@@ -405,3 +585,109 @@ export async function restoreFromBackup(
     };
   }
 }
+
+// ============================================================================
+// Advanced Parser Utilities
+// ============================================================================
+
+/**
+ * Validate a patch before saving it.
+ * Checks for parse errors and analyzes semantics.
+ */
+export function validatePatchContent(patchContent: string): {
+  valid: boolean;
+  parsed?: ParsedPatch;
+  semantics?: ReturnType<typeof analyzePatchSemantics>;
+  errors: string[];
+} {
+  try {
+    const parsed = patchContent.includes("*** Begin Patch")
+      ? parseApplyPatchFormat(patchContent)
+      : parsePatch(patchContent);
+
+    if (parsed.files.length === 0) {
+      return { valid: false, errors: ["Patch contains no file changes"] };
+    }
+
+    const semantics = analyzePatchSemantics(parsed);
+
+    return {
+      valid: true,
+      parsed,
+      semantics,
+      errors: parsed.parseWarnings,
+    };
+  } catch (err) {
+    return {
+      valid: false,
+      errors: [err instanceof Error ? err.message : String(err)],
+    };
+  }
+}
+
+/**
+ * Check if a patch can be applied cleanly (no conflicts).
+ */
+export async function canApplyPatch(
+  patchContent: string,
+  workspaceDir: string,
+): Promise<{
+  canApply: boolean;
+  conflicts: PatchConflict[];
+  alreadyApplied: boolean;
+}> {
+  try {
+    const parsed = patchContent.includes("*** Begin Patch")
+      ? parseApplyPatchFormat(patchContent)
+      : parsePatch(patchContent);
+
+    const conflicts = await detectConflicts(parsed, workspaceDir);
+    const blockingConflicts = conflicts.filter((c) => c.type !== "already_applied");
+    const alreadyApplied =
+      conflicts.every((c) => c.type === "already_applied") && conflicts.length > 0;
+
+    return {
+      canApply: blockingConflicts.length === 0,
+      conflicts,
+      alreadyApplied,
+    };
+  } catch (err) {
+    return {
+      canApply: false,
+      conflicts: [
+        {
+          file: "unknown",
+          hunkIndex: -1,
+          type: "context_mismatch",
+          description: err instanceof Error ? err.message : String(err),
+        },
+      ],
+      alreadyApplied: false,
+    };
+  }
+}
+
+/**
+ * Dry-run a patch to see what would happen without making changes.
+ */
+export async function dryRunPatch(
+  patchContent: string,
+  workspaceDir: string,
+  options?: {
+    fuzzyMatch?: boolean;
+    maxFuzzyOffset?: number;
+  },
+): Promise<PatchApplicationResult> {
+  const parsed = patchContent.includes("*** Begin Patch")
+    ? parseApplyPatchFormat(patchContent)
+    : parsePatch(patchContent);
+
+  return applyPatchAdvanced(parsed, workspaceDir, {
+    dryRun: true,
+    fuzzyMatch: options?.fuzzyMatch ?? true,
+    maxFuzzyOffset: options?.maxFuzzyOffset ?? 30,
+  });
+}
+
+// Re-export types from advanced parser for consumers
+export type { ParsedPatch, PatchConflict, PatchApplicationResult };
