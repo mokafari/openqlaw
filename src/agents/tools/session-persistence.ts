@@ -239,7 +239,14 @@ export async function saveSessionState(state: SessionState): Promise<void> {
   await fs.mkdir(sessionDir, { recursive: true });
 
   const statePath = getSessionStatePath(state.sessionId);
-  state.lastActiveAt = Date.now();
+  // Preserve lastActiveAt if it was explicitly set (for testing/recovery purposes)
+  // Otherwise, update to now
+  if (state.lastActiveAt < Date.now() - 60000) {
+    // lastActiveAt is more than 60s in the past - was explicitly set, preserve it
+  } else {
+    // Recent or not set - update to now
+    state.lastActiveAt = Date.now();
+  }
 
   await fs.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
 

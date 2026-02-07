@@ -212,30 +212,7 @@ export function parseApplyPatchFormat(content: string): ParsedPatch {
 
     if (!inPatch) continue;
 
-    // File markers
-    if (line.startsWith("*** ")) {
-      // Save previous file
-      if (currentFile && currentHunk) {
-        currentFile.hunks.push(currentHunk);
-      }
-      if (currentFile) {
-        files.push(currentFile);
-      }
-
-      const filePath = line.substring(4).trim();
-      currentFile = {
-        oldPath: filePath,
-        newPath: filePath,
-        isNew: false,
-        isDeleted: false,
-        isRenamed: false,
-        hunks: [],
-      };
-      currentHunk = null;
-      continue;
-    }
-
-    // New file marker
+    // New file marker (check BEFORE generic "*** " to take precedence)
     if (line.startsWith("*** Add File: ")) {
       if (currentFile && currentHunk) {
         currentFile.hunks.push(currentHunk);
@@ -287,6 +264,29 @@ export function parseApplyPatchFormat(content: string): ParsedPatch {
       currentHunk = null;
       files.push(currentFile);
       currentFile = null;
+      continue;
+    }
+
+    // Generic file markers (after specific Add/Delete checks)
+    if (line.startsWith("*** ")) {
+      // Save previous file
+      if (currentFile && currentHunk) {
+        currentFile.hunks.push(currentHunk);
+      }
+      if (currentFile) {
+        files.push(currentFile);
+      }
+
+      const filePath = line.substring(4).trim();
+      currentFile = {
+        oldPath: filePath,
+        newPath: filePath,
+        isNew: false,
+        isDeleted: false,
+        isRenamed: false,
+        hunks: [],
+      };
+      currentHunk = null;
       continue;
     }
 
@@ -622,11 +622,20 @@ export function findFuzzyMatch(
   const minSimilarity = options?.minSimilarity ?? 0.8;
 
   // Build expected context (lines that should exist)
-  const expectedLines: string[] = [];
-  for (const raw of hunk.rawLines) {
-    if (raw.startsWith(" ") || raw.startsWith("-")) {
-      expectedLines.push(raw.substring(1));
+  // If rawLines is available, use it; otherwise fall back to context + removals
+  let expectedLines: string[] = [];
+
+  if (hunk.rawLines && hunk.rawLines.length > 0) {
+    for (const raw of hunk.rawLines) {
+      // Skip header lines starting with @@
+      if (raw.startsWith("@@")) continue;
+      if (raw.startsWith(" ") || raw.startsWith("-")) {
+        expectedLines.push(raw.substring(1));
+      }
     }
+  } else {
+    // Fall back to context + removals
+    expectedLines = [...hunk.context, ...hunk.removals];
   }
 
   if (expectedLines.length === 0) {
@@ -652,13 +661,14 @@ export function findFuzzyMatch(
     }
     const avgSimilarity = totalSimilarity / expectedLines.length;
 
-    if (avgSimilarity > bestSimilarity) {
+    // Update best match (including when avgSimilarity = 0 on first iteration)
+    if (avgSimilarity > bestSimilarity || bestSimilarity === 0) {
       bestSimilarity = avgSimilarity;
       bestOffset = offset;
     }
   }
 
-  if (bestSimilarity >= minSimilarity) {
+  if (bestSimilarity > 0 && bestSimilarity >= minSimilarity) {
     return { offset: bestOffset, similarity: bestSimilarity };
   }
 
