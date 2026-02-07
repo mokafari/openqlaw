@@ -117,8 +117,14 @@ export async function runEmbeddedPiAgent(
         params.config?.agents?.defaults?.ollamaFallback?.enabled !== false;
       const ollamaFallbackAutoAdd =
         params.config?.agents?.defaults?.ollamaFallback?.autoAdd !== false;
+      const geminiFallbackEnabled =
+        params.config?.agents?.defaults?.geminiFallback?.enabled !== false;
+      const geminiFallbackAutoAdd =
+        params.config?.agents?.defaults?.geminiFallback?.autoAdd !== false;
       const fallbackConfigured =
-        explicitFallbacks || (ollamaFallbackEnabled && ollamaFallbackAutoAdd);
+        explicitFallbacks ||
+        (ollamaFallbackEnabled && ollamaFallbackAutoAdd) ||
+        (geminiFallbackEnabled && geminiFallbackAutoAdd);
       await ensureOpenClawModelsJson(params.config, agentDir);
 
       const { model, error, authStorage, modelRegistry } = resolveModel(

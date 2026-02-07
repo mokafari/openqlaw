@@ -160,6 +160,13 @@ export function resolveFailoverReasonFromError(err: unknown): FailoverReason | n
   if (status === 408) {
     return "timeout";
   }
+  // Handle 400 errors that indicate model incompatibility (e.g., "does not support chat")
+  if (status === 400) {
+    const message = getErrorMessage(err);
+    if (message && /does not support|not supported|unsupported|incompatible/i.test(message)) {
+      return "format"; // Treat as format/compatibility error
+    }
+  }
 
   const code = (getErrorCode(err) ?? "").toUpperCase();
   if (["ETIMEDOUT", "ESOCKETTIMEDOUT", "ECONNRESET", "ECONNABORTED"].includes(code)) {

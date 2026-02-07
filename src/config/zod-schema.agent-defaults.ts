@@ -176,6 +176,15 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    geminiFallback: z
+      .object({
+        enabled: z.boolean().optional(),
+        autoAdd: z.boolean().optional(),
+        priority: z.number().int().optional(),
+        preferredModel: z.string().optional(),
+      })
+      .strict()
+      .optional(),
     costAwareRouting: z
       .object({
         enabled: z.boolean().optional(),

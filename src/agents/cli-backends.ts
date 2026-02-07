@@ -75,6 +75,35 @@ const DEFAULT_CODEX_BACKEND: CliBackendConfig = {
   serialize: true,
 };
 
+const GEMINI_MODEL_ALIASES: Record<string, string> = {
+  "gemini-2.5-pro": "gemini-2.5-pro",
+  "gemini-2.5-flash": "gemini-2.5-flash",
+  "gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
+  "gemini-1.5-pro": "gemini-1.5-pro",
+  "gemini-1.5-flash": "gemini-1.5-flash",
+  flash: "gemini-2.5-flash",
+  pro: "gemini-2.5-pro",
+};
+
+const DEFAULT_GEMINI_CLI_BACKEND: CliBackendConfig = {
+  command: "gemini",
+  args: ["-p", "--output-format", "json"],
+  resumeArgs: ["-p", "--output-format", "json", "--resume", "{sessionId}"],
+  output: "json",
+  input: "arg",
+  modelArg: "-m",
+  modelAliases: GEMINI_MODEL_ALIASES,
+  // Gemini CLI uses --resume for session management (not --session-id)
+  // sessionIdFields will extract session_id from JSON output
+  sessionIdFields: ["session_id", "sessionId", "conversation_id", "conversationId"],
+  sessionMode: "existing", // Use existing sessions via --resume
+  systemPromptArg: "--system-prompt",
+  systemPromptMode: "append",
+  systemPromptWhen: "first",
+  clearEnv: ["GEMINI_API_KEY"],
+  serialize: true,
+};
+
 function normalizeBackendKey(key: string): string {
   return normalizeProviderId(key);
 }
@@ -112,6 +141,7 @@ export function resolveCliBackendIds(cfg?: OpenClawConfig): Set<string> {
   const ids = new Set<string>([
     normalizeBackendKey("claude-cli"),
     normalizeBackendKey("codex-cli"),
+    normalizeBackendKey("gemini-cli"),
   ]);
   const configured = cfg?.agents?.defaults?.cliBackends ?? {};
   for (const key of Object.keys(configured)) {
@@ -138,6 +168,14 @@ export function resolveCliBackendConfig(
   }
   if (normalized === "codex-cli") {
     const merged = mergeBackendConfig(DEFAULT_CODEX_BACKEND, override);
+    const command = merged.command?.trim();
+    if (!command) {
+      return null;
+    }
+    return { id: normalized, config: { ...merged, command } };
+  }
+  if (normalized === "gemini-cli") {
+    const merged = mergeBackendConfig(DEFAULT_GEMINI_CLI_BACKEND, override);
     const command = merged.command?.trim();
     if (!command) {
       return null;

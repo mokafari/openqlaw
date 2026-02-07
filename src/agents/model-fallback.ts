@@ -19,7 +19,7 @@ import {
   resolveConfiguredModelRef,
   resolveModelRefFromString,
 } from "./model-selection.js";
-import { checkOllamaAvailability } from "./models-config.providers.js";
+import { checkOllamaAvailability, checkGeminiAvailability } from "./models-config.providers.js";
 
 type ModelCandidate = {
   provider: string;
@@ -218,11 +218,101 @@ async function resolveFallbackCandidates(params: {
     addCandidate({ provider: primary.provider, model: primary.model }, false);
   }
 
-  // Auto-add Ollama to fallbacks if enabled and available
+  // Auto-add Gemini to fallbacks if enabled and available (before Ollama)
+  const geminiConfig = params.cfg?.agents?.defaults?.geminiFallback;
+  const geminiEnabled = geminiConfig?.enabled !== false; // Default: true
+  const geminiAutoAdd = geminiConfig?.autoAdd !== false; // Default: true
+  const geminiPriority = geminiConfig?.priority ?? -1; // Default: -1 (before Ollama)
+  const geminiPreferredModel = geminiConfig?.preferredModel;
+
+  if (
+    geminiEnabled &&
+    geminiAutoAdd &&
+    params.fallbacksOverride === undefined && // Don't auto-add if user explicitly set fallbacks
+    candidates.length > 0 // Only add if we have candidates
+  ) {
+    try {
+      const geminiAvailability = await checkGeminiAvailability({
+        preferredModel: geminiPreferredModel,
+        preferCli: true, // Prefer CLI over API
+      });
+      if (geminiAvailability.available && geminiAvailability.preferredModel) {
+        // Use gemini-cli if CLI is available, otherwise use google API
+        const provider = geminiAvailability.useCli ? "gemini-cli" : "google";
+        const geminiCandidate: ModelCandidate = {
+          provider,
+          model: geminiAvailability.preferredModel,
+        };
+        const geminiKey = modelKey(geminiCandidate.provider, geminiCandidate.model);
+
+        // Only add if not already in the list
+        if (!seen.has(geminiKey)) {
+          if (geminiPriority === -1) {
+            // Append to end (default)
+            addCandidate(geminiCandidate, true);
+            console.log(
+              `[gemini-fallback] Auto-added Gemini (${geminiCandidate.model}) to fallback chain (position: last)`,
+            );
+          } else if (geminiPriority === 0) {
+            // Prepend to start (after primary)
+            candidates.splice(1, 0, geminiCandidate);
+            seen.add(geminiKey);
+            console.log(
+              `[gemini-fallback] Auto-added Gemini (${geminiCandidate.model}) to fallback chain (position: first)`,
+            );
+          } else if (geminiPriority > 0) {
+            // Insert at specific index
+            const insertIndex = Math.min(geminiPriority + 1, candidates.length);
+            candidates.splice(insertIndex, 0, geminiCandidate);
+            seen.add(geminiKey);
+            console.log(
+              `[gemini-fallback] Auto-added Gemini (${geminiCandidate.model}) to fallback chain (position: ${insertIndex})`,
+            );
+          } else {
+            // Negative but not -1: insert from end
+            const insertIndex = Math.max(0, candidates.length + geminiPriority + 1);
+            candidates.splice(insertIndex, 0, geminiCandidate);
+            seen.add(geminiKey);
+            console.log(
+              `[gemini-fallback] Auto-added Gemini (${geminiCandidate.model}) to fallback chain (position: ${insertIndex})`,
+            );
+          }
+        }
+      } else if (geminiEnabled && geminiAutoAdd) {
+        // Provide more helpful error message
+        try {
+          const { execSync } = await import("node:child_process");
+          execSync("which gemini", { stdio: "ignore" });
+          console.log(
+            `[gemini-fallback] Gemini CLI is available but checkGeminiAvailability returned false (this should not happen)`,
+          );
+        } catch {
+          // CLI not found - check if API key is available as fallback
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (apiKey) {
+            console.log(
+              `[gemini-fallback] Gemini CLI not found, but GEMINI_API_KEY is set - will use API instead`,
+            );
+          } else {
+            console.log(
+              `[gemini-fallback] Gemini not available: CLI not found and GEMINI_API_KEY not set. Install Gemini CLI (npm install -g @google/gemini-cli) or set GEMINI_API_KEY`,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail availability check - don't block fallback chain
+      if (geminiEnabled && geminiAutoAdd) {
+        console.log(`[gemini-fallback] Failed to check Gemini availability: ${String(error)}`);
+      }
+    }
+  }
+
+  // Auto-add Ollama to fallbacks if enabled and available (after Gemini)
   const ollamaConfig = params.cfg?.agents?.defaults?.ollamaFallback;
   const ollamaEnabled = ollamaConfig?.enabled !== false; // Default: true
   const ollamaAutoAdd = ollamaConfig?.autoAdd !== false; // Default: true
-  const ollamaPriority = ollamaConfig?.priority ?? -1; // Default: -1 (last)
+  const ollamaPriority = ollamaConfig?.priority ?? -1; // Default: -1 (after Gemini)
 
   if (
     ollamaEnabled &&
@@ -348,6 +438,34 @@ export async function runWithModelFallback<T>(params: {
       } catch (error) {
         // If availability check fails, still attempt the call (might be transient)
         // The actual call will fail if Ollama is truly unavailable
+      }
+    }
+
+    // Lightweight health check for Gemini CLI before attempting
+    if (candidate.provider === "gemini-cli") {
+      try {
+        const geminiAvailability = await checkGeminiAvailability({
+          preferCli: true,
+        });
+        if (!geminiAvailability.available || !geminiAvailability.useCli) {
+          attempts.push({
+            provider: candidate.provider,
+            model: candidate.model,
+            error: "Gemini CLI is not available (command not found on PATH)",
+            reason: "timeout",
+          });
+          continue;
+        }
+        // Update model to preferred if different (in case availability changed)
+        if (
+          geminiAvailability.preferredModel &&
+          geminiAvailability.preferredModel !== candidate.model
+        ) {
+          candidate.model = geminiAvailability.preferredModel;
+        }
+      } catch (error) {
+        // If availability check fails, still attempt the call (might be transient)
+        // The actual call will fail if Gemini CLI is truly unavailable
       }
     }
 

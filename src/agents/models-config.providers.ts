@@ -10,7 +10,11 @@ import {
   buildCloudflareAiGatewayModelDefinition,
   resolveCloudflareAiGatewayBaseUrl,
 } from "./cloudflare-ai-gateway.js";
-import { resolveAwsSdkEnvVarName, resolveEnvApiKey } from "./model-auth.js";
+import {
+  resolveAwsSdkEnvVarName,
+  resolveEnvApiKey,
+  resolveEnvApiKeyVarName,
+} from "./model-auth.js";
 import {
   buildSyntheticModelDefinition,
   SYNTHETIC_BASE_URL,
@@ -139,6 +143,11 @@ type OllamaAvailabilityResult = {
   models?: string[];
 };
 
+type GeminiAvailabilityResult = {
+  available: boolean;
+  preferredModel?: string;
+};
+
 // Cache for Ollama availability checks (TTL: 30 seconds)
 let ollamaAvailabilityCache: {
   result: OllamaAvailabilityResult;
@@ -151,6 +160,81 @@ const OLLAMA_AVAILABILITY_CACHE_TTL_MS = 30_000;
  * Check if Ollama is available and return preferred model.
  * Results are cached for 30 seconds to avoid repeated network calls.
  */
+/**
+ * Check if Gemini CLI is available (command exists on PATH).
+ * Returns preferred model if available.
+ */
+async function checkGeminiCliAvailable(): Promise<boolean> {
+  // Skip availability check in test environments
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return false;
+  }
+
+  try {
+    const { execSync } = await import("node:child_process");
+    // Try both 'which' and direct execution to handle PATH issues
+    try {
+      execSync("which gemini", { stdio: "ignore" });
+      return true;
+    } catch {
+      // If 'which' fails, try executing gemini directly (it might be in PATH but 'which' fails)
+      execSync("gemini --version", { stdio: "ignore", timeout: 2000 });
+      return true;
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if Gemini is available (CLI or API key configured).
+ * Prefers CLI if available, otherwise falls back to API.
+ * Returns preferred model and provider type if available.
+ */
+export async function checkGeminiAvailability(params?: {
+  preferredModel?: string;
+  preferCli?: boolean; // Default: true (prefer CLI over API)
+}): Promise<GeminiAvailabilityResult & { useCli?: boolean }> {
+  // Skip availability check in test environments
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return { available: false };
+  }
+
+  const preferCli = params?.preferCli !== false; // Default: true
+
+  try {
+    // Check for Gemini CLI first (if preferred) - CLI doesn't need API key
+    if (preferCli) {
+      const cliAvailable = await checkGeminiCliAvailable();
+      if (cliAvailable) {
+        const preferredModel = params?.preferredModel ?? "gemini-2.5-flash";
+        return {
+          available: true,
+          preferredModel,
+          useCli: true,
+        };
+      }
+    }
+
+    // Fall back to API key check only if CLI is not available
+    const apiKey = resolveEnvApiKeyVarName("google") ?? process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return { available: false };
+    }
+
+    // Default to gemini-2.5-flash (fast and free tier) or use provided preference
+    const preferredModel = params?.preferredModel ?? "gemini-2.5-flash";
+
+    return {
+      available: true,
+      preferredModel,
+      useCli: false,
+    };
+  } catch (error) {
+    return { available: false };
+  }
+}
+
 export async function checkOllamaAvailability(): Promise<OllamaAvailabilityResult> {
   // Return cached result if still valid
   if (ollamaAvailabilityCache) {

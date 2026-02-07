@@ -248,6 +248,17 @@ export type AgentDefaultsConfig = {
     /** Position in fallback chain: -1 = last (default), 0 = first, positive = specific index. */
     priority?: number;
   };
+  /** Gemini fallback configuration. */
+  geminiFallback?: {
+    /** Enable automatic Gemini fallback (default: true). */
+    enabled?: boolean;
+    /** Automatically add Gemini to fallbacks when available (default: true). */
+    autoAdd?: boolean;
+    /** Position in fallback chain: -1 = last (default), 0 = first, positive = specific index. */
+    priority?: number;
+    /** Preferred Gemini model to use (default: "gemini-2.5-flash"). */
+    preferredModel?: string;
+  };
   /** Cost-aware routing configuration. */
   costAwareRouting?: {
     /** Enable cost-aware routing to use Ollama for low-complexity tasks (default: false). */
