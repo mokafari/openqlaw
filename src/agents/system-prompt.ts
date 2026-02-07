@@ -728,6 +728,7 @@ export async function buildAgentSystemPrompt(params: {
         "evolution_list_patches",
         "rebuild_gateway",
         "meta_learning",
+        "session_diff",
       ].includes(name.toLowerCase()),
     ) ?? false;
 
@@ -789,6 +790,13 @@ export async function buildAgentSystemPrompt(params: {
       "- Access learning journal entries to review what worked and what failed",
       "- Analyze patterns across sessions to identify recurring issues and successful strategies",
       "- Knowledge synthesis automatically extracts insights from telemetry and journal entries",
+      "",
+      "**Session Diff & Behavioral Analysis:**",
+      "- Use session_diff tool to compare sessions semantically (not just text diff)",
+      "- Identify divergence points where behavior differed between sessions",
+      "- Detect behavioral shifts: error rate changes, latency regressions, tool usage patterns",
+      "- Extract reusable patterns and insights from session comparisons",
+      "- Actions: compare (two sessions), compare_latest (recent sessions), highlight (formatted report), extract_pattern (insights)",
       "",
       "**Safety:**",
       "- Self-modification is gated by policy guardrails",
