@@ -78,13 +78,32 @@ export async function runDueJobs(state: CronServiceState) {
 
   const due = state.store.jobs.filter((j) => {
     if (!j.enabled) {
+      console.error("[CRON-DEBUG] Skipping disabled job:", j.name);
       return false;
     }
     if (typeof j.state.runningAtMs === "number") {
+      console.error("[CRON-DEBUG] Skipping running job:", j.name);
       return false;
     }
     const next = j.state.nextRunAtMs;
     const isDue = typeof next === "number" && now >= next;
+
+    // Log first 3 jobs to see what's happening
+    const jobIndex = state.store.jobs.indexOf(j);
+    if (jobIndex < 3) {
+      console.error(
+        `[CRON-DEBUG] Job[${jobIndex}]:`,
+        j.name,
+        "next:",
+        next,
+        "now:",
+        now,
+        "due:",
+        isDue,
+        "gap:",
+        next ? next - now : "null",
+      );
+    }
 
     // Debug: Log why jobs aren't due
     if (!isDue && typeof next === "number") {
@@ -98,12 +117,19 @@ export async function runDueJobs(state: CronServiceState) {
   });
 
   // Debug: Log how many due jobs found
+  console.error(
+    "[CRON-DEBUG] Found",
+    due.length,
+    "due jobs:",
+    due.map((j) => j.name),
+  );
   state.deps.log.info(
     { dueCount: due.length, dueJobs: due.map((j) => j.name) },
     "cron: found due jobs",
   );
 
   for (const job of due) {
+    console.error("[CRON-DEBUG] Executing job:", job.name);
     await executeJob(state, job, now, { forced: false });
   }
 }
