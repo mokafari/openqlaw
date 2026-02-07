@@ -226,6 +226,8 @@ export class Breeder {
       total: number;
       successful: number;
       failed: number;
+      skipped: number;
+      throttled: number;
       systemRecoveries: number;
     };
   }> {
@@ -240,8 +242,10 @@ export class Breeder {
 
     const summary = {
       total: results.length,
-      successful: results.filter((r) => r.success).length,
-      failed: results.filter((r) => !r.success).length,
+      successful: results.filter((r) => r.status === "success").length,
+      failed: results.filter((r) => r.status === "failed").length,
+      skipped: results.filter((r) => r.status === "skipped").length,
+      throttled: results.filter((r) => r.status === "throttled").length,
       systemRecoveries: results.filter((r) => r.success && !r.patchId).length, // System recoveries don't have patchId
     };
 
@@ -262,7 +266,14 @@ export class Breeder {
     evolution: EvolutionResult;
     mutations?: {
       results: MutationResult[];
-      summary: { total: number; successful: number; failed: number; systemRecoveries: number };
+      summary: {
+        total: number;
+        successful: number;
+        failed: number;
+        skipped: number;
+        throttled: number;
+        systemRecoveries: number;
+      };
     };
   }> {
     // First, run regular evolution

@@ -237,9 +237,12 @@ export class EvolutionDaemon {
       this.status.mutationCount++;
       this.status.lastMutationTime = Date.now();
 
-      log.info(
-        `[evolution-daemon] Mutation cycle complete - ${result.summary.successful} successful, ${result.summary.failed} failed`,
-      );
+      const { successful, failed, skipped, throttled } = result.summary;
+      const parts = [`${successful} successful`];
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (skipped > 0) parts.push(`${skipped} skipped`);
+      if (throttled > 0) parts.push(`${throttled} throttled`);
+      log.info(`[evolution-daemon] Mutation cycle complete - ${parts.join(", ")}`);
     } catch (err) {
       log.error(`[evolution-daemon] Mutation cycle failed: ${err}`);
     }
