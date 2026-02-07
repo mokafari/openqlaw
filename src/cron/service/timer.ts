@@ -31,6 +31,7 @@ export function armTimer(state: CronServiceState) {
 }
 
 export async function onTimer(state: CronServiceState) {
+  console.error("[CRON-DEBUG]", new Date().toISOString(), "🚨 CRON TIMER FIRED - onTimer called");
   state.deps.log.error({ ts: new Date().toISOString() }, "🚨 CRON TIMER FIRED");
   if (state.running) {
     return;
