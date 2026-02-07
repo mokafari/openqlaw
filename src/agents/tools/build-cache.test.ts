@@ -7,8 +7,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   BuildCacheAnalyzer,
   createBuildCacheAnalyzer,
+  analyzeBuildCache,
+  findSlowFiles,
+  suggestIncrementalTargets,
+  trackBuildPerformance,
   type CacheStats,
   type OptimizationSuggestion,
+  type CacheAnalysis,
+  type SlowFile,
+  type BuildMetrics,
 } from "./build-cache.js";
 
 // Mock fs promises
@@ -272,5 +279,327 @@ describe("createBuildCacheAnalyzer", () => {
   it("creates BuildCacheAnalyzer with custom path", () => {
     const analyzer = createBuildCacheAnalyzer("/custom/path");
     expect(analyzer).toBeInstanceOf(BuildCacheAnalyzer);
+  });
+});
+
+// ============================================================================
+// Standalone API Function Tests
+// ============================================================================
+
+describe("analyzeBuildCache", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+  });
+
+  it("returns CacheAnalysis with all fields", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {
+        "src/file.ts": {
+          source: "src/file.ts",
+          output: "dist/file.js",
+          inputHash: "abc123",
+          outputHash: "def456",
+          buildTime: Date.now() - 1000,
+          durationMs: 150,
+          cacheHit: false,
+        },
+      },
+      lastBuild: Date.now(),
+      buildHistory: [{ timestamp: Date.now(), durationMs: 150, filesBuilt: 1, cacheHits: 0 }],
+    };
+
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      if (String(path).includes(".build-cache.json")) {
+        return JSON.stringify(mockState);
+      }
+      return "{}";
+    });
+
+    const analysis = await analyzeBuildCache("/fake/project");
+
+    expect(analysis.buildDir).toBe("/fake/project");
+    expect(analysis.stats).toBeDefined();
+    expect(analysis.stats.totalBuilds).toBe(1);
+    expect(analysis.artifacts).toHaveLength(1);
+    expect(analysis.lastBuildTime).toBeInstanceOf(Date);
+  });
+
+  it("identifies stale artifacts", async () => {
+    const staleTime = Date.now() - 48 * 60 * 60 * 1000; // 48 hours ago
+    const mockState = {
+      version: 1,
+      artifacts: {
+        "src/stale.ts": {
+          source: "src/stale.ts",
+          output: "dist/stale.js",
+          inputHash: "abc",
+          buildTime: staleTime,
+          durationMs: 100,
+          cacheHit: false,
+        },
+      },
+      lastBuild: staleTime,
+      buildHistory: [],
+    };
+
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify(mockState));
+
+    const analysis = await analyzeBuildCache("/fake/project");
+
+    expect(analysis.staleArtifacts).toContain("src/stale.ts");
+  });
+});
+
+describe("findSlowFiles", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+  });
+
+  it("finds files above threshold", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {
+        "src/fast.ts": {
+          source: "src/fast.ts",
+          output: "dist/fast.js",
+          inputHash: "abc",
+          buildTime: Date.now(),
+          durationMs: 50,
+          cacheHit: false,
+        },
+        "src/slow.ts": {
+          source: "src/slow.ts",
+          output: "dist/slow.js",
+          inputHash: "def",
+          buildTime: Date.now(),
+          durationMs: 500,
+          cacheHit: false,
+        },
+      },
+      lastBuild: Date.now(),
+      buildHistory: [],
+    };
+
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify(mockState));
+
+    const slowFiles = await findSlowFiles(200, "/fake/project");
+
+    expect(slowFiles).toHaveLength(1);
+    expect(slowFiles[0].file).toBe("src/slow.ts");
+    expect(slowFiles[0].durationMs).toBe(500);
+    expect(slowFiles[0].percentile).toBeGreaterThan(50);
+  });
+
+  it("returns empty array when no files exceed threshold", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {
+        "src/fast.ts": {
+          source: "src/fast.ts",
+          output: "dist/fast.js",
+          inputHash: "abc",
+          buildTime: Date.now(),
+          durationMs: 50,
+          cacheHit: false,
+        },
+      },
+      lastBuild: Date.now(),
+      buildHistory: [],
+    };
+
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify(mockState));
+
+    const slowFiles = await findSlowFiles(100, "/fake/project");
+
+    expect(slowFiles).toHaveLength(0);
+  });
+
+  it("provides suggestions for very slow files", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {
+        "src/very-slow.ts": {
+          source: "src/very-slow.ts",
+          output: "dist/very-slow.js",
+          inputHash: "abc",
+          buildTime: Date.now(),
+          durationMs: 6000, // 6 seconds
+          cacheHit: false,
+        },
+      },
+      lastBuild: Date.now(),
+      buildHistory: [],
+    };
+
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify(mockState));
+
+    const slowFiles = await findSlowFiles(1000, "/fake/project");
+
+    expect(slowFiles[0].suggestion).toBeDefined();
+    expect(slowFiles[0].suggestion).toContain("lazy loading");
+  });
+});
+
+describe("suggestIncrementalTargets", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+  });
+
+  it("suggests enabling incremental when not configured", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {},
+      lastBuild: 0,
+      buildHistory: [],
+    };
+
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      if (String(path).includes("tsconfig.json")) {
+        return JSON.stringify({ compilerOptions: {} });
+      }
+      return JSON.stringify(mockState);
+    });
+
+    const suggestions = await suggestIncrementalTargets("/fake/project");
+
+    expect(suggestions.some((s) => s.includes("incremental: true"))).toBe(true);
+  });
+
+  it("suggests tsBuildInfoFile when missing", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {},
+      lastBuild: 0,
+      buildHistory: [],
+    };
+
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      if (String(path).includes("tsconfig.json")) {
+        return JSON.stringify({ compilerOptions: { incremental: true } });
+      }
+      return JSON.stringify(mockState);
+    });
+
+    const suggestions = await suggestIncrementalTargets("/fake/project");
+
+    expect(suggestions.some((s) => s.includes("tsBuildInfoFile"))).toBe(true);
+  });
+
+  it("identifies directories with slow files", async () => {
+    const mockState = {
+      version: 1,
+      artifacts: {},
+      lastBuild: 0,
+      buildHistory: [],
+    };
+
+    // Create 6 slow files in same directory
+    for (let i = 0; i < 6; i++) {
+      mockState.artifacts[`src/slow/file${i}.ts`] = {
+        source: `src/slow/file${i}.ts`,
+        output: `dist/slow/file${i}.js`,
+        inputHash: `hash${i}`,
+        buildTime: Date.now(),
+        durationMs: 300,
+        cacheHit: false,
+      };
+    }
+
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      if (String(path).includes("tsconfig.json")) {
+        return JSON.stringify({
+          compilerOptions: { incremental: true, tsBuildInfoFile: ".tsbuildinfo" },
+        });
+      }
+      return JSON.stringify(mockState);
+    });
+
+    const suggestions = await suggestIncrementalTargets("/fake/project");
+
+    expect(suggestions.some((s) => s.includes("src/slow"))).toBe(true);
+  });
+});
+
+describe("trackBuildPerformance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({
+        version: 1,
+        artifacts: {},
+        lastBuild: 0,
+        buildHistory: [],
+      }),
+    );
+  });
+
+  it("parses build log and returns metrics", async () => {
+    const buildLog = `
+> pnpm build
+
+src/index.ts
+src/utils.ts
+Done in 2.5s
+`;
+
+    const metrics = await trackBuildPerformance(buildLog, "/fake/project");
+
+    expect(metrics.totalDurationMs).toBe(2500);
+    expect(metrics.timestamp).toBeInstanceOf(Date);
+  });
+
+  it("detects incremental builds", async () => {
+    const buildLog = `
+Using incremental compilation...
+Reusing resolution from previous build
+Done in 1.2s
+`;
+
+    const metrics = await trackBuildPerformance(buildLog, "/fake/project");
+
+    expect(metrics.incrementalBuild).toBe(true);
+  });
+
+  it("counts cache hits", async () => {
+    const buildLog = `
+src/a.ts - from cache
+src/b.ts - cached
+src/c.ts - unchanged
+src/d.ts
+Done in 0.5s
+`;
+
+    const metrics = await trackBuildPerformance(buildLog, "/fake/project");
+
+    expect(metrics.filesFromCache).toBeGreaterThan(0);
+    expect(metrics.cacheHitRate).toBeGreaterThan(0);
+  });
+
+  it("parses errors from log", async () => {
+    const buildLog = `
+src/broken.ts:10:5 - error TS2345
+Found 1 error
+`;
+
+    const metrics = await trackBuildPerformance(buildLog, "/fake/project");
+
+    expect(metrics.errors).toBe(1);
+  });
+
+  it("parses Vite bundle sizes", async () => {
+    const buildLog = `
+dist/index.js  50.00 kB │ gzip: 15.00 kB
+built in 800ms
+`;
+
+    const metrics = await trackBuildPerformance(buildLog, "/fake/project");
+
+    expect(metrics.bundleSize).toBeGreaterThan(0);
+    expect(metrics.totalDurationMs).toBe(800);
   });
 });

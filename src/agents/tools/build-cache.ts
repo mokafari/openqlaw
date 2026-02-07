@@ -500,3 +500,269 @@ export class BuildCacheAnalyzer {
 export function createBuildCacheAnalyzer(rootDir?: string): BuildCacheAnalyzer {
   return new BuildCacheAnalyzer(rootDir ?? process.cwd());
 }
+
+// ============================================================================
+// Standalone API Functions (as specified in task requirements)
+// ============================================================================
+
+/**
+ * Cache analysis result.
+ */
+export type CacheAnalysis = {
+  buildDir: string;
+  stats: CacheStats;
+  artifacts: BuildArtifact[];
+  suggestions: OptimizationSuggestion[];
+  lastBuildTime: Date | null;
+  cacheSize: number;
+  staleArtifacts: string[];
+};
+
+/**
+ * Slow file record.
+ */
+export type SlowFile = {
+  file: string;
+  durationMs: number;
+  averageDurationMs: number;
+  buildCount: number;
+  percentile: number;
+  suggestion?: string;
+};
+
+/**
+ * Build metrics from log analysis.
+ */
+export type BuildMetrics = {
+  totalDurationMs: number;
+  filesCompiled: number;
+  filesFromCache: number;
+  errors: number;
+  warnings: number;
+  cacheHitRate: number;
+  incrementalBuild: boolean;
+  bundleSize?: number;
+  timestamp: Date;
+};
+
+/**
+ * Analyze build artifacts and caching for a directory.
+ */
+export async function analyzeBuildCache(buildDir: string): Promise<CacheAnalysis> {
+  const analyzer = new BuildCacheAnalyzer(buildDir);
+  await analyzer.load();
+
+  const stats = analyzer.getStats();
+  const suggestions = await analyzer.getOptimizationSuggestions();
+  const history = analyzer.getBuildHistory(1);
+
+  // Get all artifacts
+  const artifacts = Object.values(
+    (analyzer as unknown as { state: BuildCacheState }).state.artifacts,
+  );
+
+  // Find stale artifacts (older than 24 hours with no recent rebuild)
+  const staleThreshold = Date.now() - 24 * 60 * 60 * 1000;
+  const staleArtifacts = artifacts.filter((a) => a.buildTime < staleThreshold).map((a) => a.source);
+
+  // Estimate cache size (sum of output files)
+  const cacheSize = artifacts.reduce((sum, a) => {
+    // Rough estimate: output hash length * 2 bytes per artifact
+    return sum + (a.outputHash?.length ?? 0) * 2;
+  }, 0);
+
+  return {
+    buildDir,
+    stats,
+    artifacts,
+    suggestions,
+    lastBuildTime: history.length > 0 ? new Date(history[0].timestamp) : null,
+    cacheSize,
+    staleArtifacts,
+  };
+}
+
+/**
+ * Find files that are slow to compile above a threshold.
+ */
+export async function findSlowFiles(threshold: number, buildDir?: string): Promise<SlowFile[]> {
+  const analyzer = new BuildCacheAnalyzer(buildDir ?? process.cwd());
+  await analyzer.load();
+
+  const state = (analyzer as unknown as { state: BuildCacheState }).state;
+  const artifacts = Object.values(state.artifacts);
+
+  if (artifacts.length === 0) {
+    return [];
+  }
+
+  // Calculate average and identify slow files
+  const totalDuration = artifacts.reduce((sum, a) => sum + a.durationMs, 0);
+  const avgDuration = totalDuration / artifacts.length;
+
+  // Sort by duration to calculate percentiles
+  const sortedByDuration = [...artifacts].sort((a, b) => b.durationMs - a.durationMs);
+
+  const slowFiles: SlowFile[] = [];
+
+  for (const artifact of sortedByDuration) {
+    if (artifact.durationMs >= threshold) {
+      // Find percentile rank
+      const rank = sortedByDuration.findIndex((a) => a.source === artifact.source);
+      const percentile = ((sortedByDuration.length - rank) / sortedByDuration.length) * 100;
+
+      // Generate suggestion based on file type
+      let suggestion: string | undefined;
+      if (artifact.durationMs > avgDuration * 3) {
+        suggestion = "Consider splitting into smaller modules";
+      } else if (artifact.source.includes("index.ts") || artifact.source.includes("barrel")) {
+        suggestion = "Barrel exports may cause cascade rebuilds";
+      } else if (artifact.durationMs > 5000) {
+        suggestion = "Consider lazy loading or code splitting";
+      }
+
+      slowFiles.push({
+        file: artifact.source,
+        durationMs: artifact.durationMs,
+        averageDurationMs: avgDuration,
+        buildCount: 1, // Would need history tracking for accurate count
+        percentile,
+        suggestion,
+      });
+    }
+  }
+
+  return slowFiles;
+}
+
+/**
+ * Suggest targets for incremental build optimization.
+ */
+export async function suggestIncrementalTargets(buildDir?: string): Promise<string[]> {
+  const analyzer = new BuildCacheAnalyzer(buildDir ?? process.cwd());
+  await analyzer.load();
+
+  const suggestions: string[] = [];
+  const state = (analyzer as unknown as { state: BuildCacheState }).state;
+  const artifacts = Object.values(state.artifacts);
+
+  // Group files by directory
+  const byDirectory: Map<string, BuildArtifact[]> = new Map();
+  for (const artifact of artifacts) {
+    const dir = dirname(artifact.source);
+    const existing = byDirectory.get(dir) ?? [];
+    existing.push(artifact);
+    byDirectory.set(dir, existing);
+  }
+
+  // Find directories with many slow files - good candidates for separate incremental targets
+  for (const [dir, files] of byDirectory.entries()) {
+    const totalDuration = files.reduce((sum, f) => sum + f.durationMs, 0);
+    const avgDuration = totalDuration / files.length;
+
+    if (files.length >= 5 && avgDuration > 200) {
+      suggestions.push(`${dir}/* (${files.length} files, avg ${avgDuration.toFixed(0)}ms)`);
+    }
+  }
+
+  // Check for files that frequently trigger rebuilds
+  const triggers = await analyzer.analyzeRebuildTriggers();
+  for (const trigger of triggers.slice(0, 5)) {
+    if (trigger.triggerCount > 3) {
+      suggestions.push(`Isolate ${trigger.file} (triggers ${trigger.triggerCount} rebuilds)`);
+    }
+  }
+
+  // Check tsconfig for incremental opportunities
+  try {
+    const tsconfigPath = join(buildDir ?? process.cwd(), "tsconfig.json");
+    const tsconfig = JSON.parse(await readFile(tsconfigPath, "utf-8"));
+
+    if (!tsconfig.compilerOptions?.incremental) {
+      suggestions.push("Enable incremental: true in tsconfig.json");
+    }
+    if (!tsconfig.compilerOptions?.tsBuildInfoFile) {
+      suggestions.push("Set tsBuildInfoFile for faster incremental builds");
+    }
+    if (tsconfig.references && tsconfig.references.length > 0) {
+      suggestions.push(
+        `Project references detected (${tsconfig.references.length}) - use pnpm build --filter for targeted builds`,
+      );
+    }
+  } catch {
+    suggestions.push("Consider adding tsconfig.json with incremental build settings");
+  }
+
+  return suggestions;
+}
+
+/**
+ * Track build performance from a build log.
+ */
+export async function trackBuildPerformance(
+  buildLog: string,
+  buildDir?: string,
+): Promise<BuildMetrics> {
+  const analyzer = new BuildCacheAnalyzer(buildDir ?? process.cwd());
+
+  // Parse both TypeScript and bundler output
+  const tscResult = analyzer.parseTscOutput(buildLog);
+  const viteResult = analyzer.parseViteOutput(buildLog);
+
+  // Detect warnings
+  const warningMatch = buildLog.match(/warning[s]?:?\s*(\d+)/gi);
+  const warnings = warningMatch
+    ? warningMatch.reduce((sum, m) => {
+        const num = m.match(/\d+/);
+        return sum + (num ? parseInt(num[0], 10) : 0);
+      }, 0)
+    : (buildLog.match(/⚠|warning/gi) ?? []).length;
+
+  // Detect cache hits from various build tools
+  const cacheHitPatterns = [/cache hit/gi, /from cache/gi, /cached/gi, /unchanged/gi, /skipped/gi];
+  let cacheHits = 0;
+  for (const pattern of cacheHitPatterns) {
+    const matches = buildLog.match(pattern);
+    if (matches) cacheHits += matches.length;
+  }
+
+  // Calculate total files (compiled + cached)
+  const totalFiles = tscResult.filesCompiled + cacheHits;
+  const cacheHitRate = totalFiles > 0 ? cacheHits / totalFiles : 0;
+
+  // Determine if incremental
+  const incrementalBuild =
+    tscResult.cacheUsed || buildLog.includes("incremental") || buildLog.includes("tsbuildinfo");
+
+  // Get duration from parsed output or estimate from log
+  let totalDurationMs = tscResult.duration ?? viteResult.duration ?? 0;
+  if (!totalDurationMs) {
+    // Try to parse pnpm/npm timing
+    const pnpmMatch = buildLog.match(/Done in (\d+(?:\.\d+)?)s/);
+    if (pnpmMatch) {
+      totalDurationMs = parseFloat(pnpmMatch[1]) * 1000;
+    }
+  }
+
+  const metrics: BuildMetrics = {
+    totalDurationMs,
+    filesCompiled: tscResult.filesCompiled,
+    filesFromCache: cacheHits,
+    errors: tscResult.errors,
+    warnings,
+    cacheHitRate,
+    incrementalBuild,
+    bundleSize: viteResult.totalSize > 0 ? viteResult.totalSize : undefined,
+    timestamp: new Date(),
+  };
+
+  // Record in analyzer for history tracking
+  await analyzer.load();
+  await analyzer.recordBuildSession({
+    durationMs: totalDurationMs,
+    filesBuilt: tscResult.filesCompiled,
+    cacheHits,
+  });
+
+  return metrics;
+}
