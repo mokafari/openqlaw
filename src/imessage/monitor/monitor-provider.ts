@@ -197,9 +197,10 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     }
   }
 
-  // Track recently seen message IDs to filter duplicate entries from imsg CLI
-  // (imsg sometimes returns the same message with is_from_me: true and is_from_me: false)
+  // Track recently seen message IDs and content to filter duplicate entries from imsg CLI
+  // (imsg sometimes returns the same message with is_from_me: true and is_from_me: false with different IDs)
   const seenMessageIds = new Set<number>();
+  const seenMessageContent = new Map<string, number>(); // content hash -> timestamp
   const MESSAGE_ID_TTL_MS = 60000; // 1 minute
   const seenMessageTimestamps = new Map<number, number>();
 
@@ -271,13 +272,31 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
       }
       seenMessageIds.add(messageId);
       seenMessageTimestamps.set(messageId, Date.now());
+    }
 
-      // Cleanup old entries
+    // Also deduplicate by content (imsg creates separate entries with different IDs for the same message)
+    const textContent = message.text?.trim() ?? "";
+    if (textContent) {
+      // Create content hash: first 100 chars of text (enough to detect duplicates)
+      const contentKey = textContent.substring(0, 100);
       const now = Date.now();
+      const lastSeen = seenMessageContent.get(contentKey);
+      if (lastSeen && now - lastSeen < 10000) {
+        // Same content seen within 10 seconds - likely a duplicate
+        return;
+      }
+      seenMessageContent.set(contentKey, now);
+
+      // Cleanup old entries (both ID and content maps)
       for (const [id, timestamp] of seenMessageTimestamps.entries()) {
         if (now - timestamp > MESSAGE_ID_TTL_MS) {
           seenMessageIds.delete(id);
           seenMessageTimestamps.delete(id);
+        }
+      }
+      for (const [content, timestamp] of seenMessageContent.entries()) {
+        if (now - timestamp > MESSAGE_ID_TTL_MS) {
+          seenMessageContent.delete(content);
         }
       }
     }
