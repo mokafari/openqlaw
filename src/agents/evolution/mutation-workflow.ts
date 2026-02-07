@@ -51,13 +51,36 @@ export class MutationWorkflow {
       return results;
     }
 
+    // Check throttling before processing hotspots
+    const { getDiagnosticThrottler } = await import("./diagnostic-throttler.js");
+    const throttler = getDiagnosticThrottler();
+
+    // Process hotspots one at a time (respecting concurrent limit)
     for (const hotspot of hotspots) {
       log.info(
         `[mutation] Diagnosing hotspot: ${hotspot.toolName} (error rate: ${(hotspot.errorRate * 100).toFixed(1)}%)`,
       );
 
+      // Check if we can spawn before processing
+      const canSpawn = await throttler.canSpawn(hotspot.toolName);
+      if (!canSpawn.allowed) {
+        log.warn(
+          `[mutation] Skipping ${hotspot.toolName} - diagnostic spawn throttled: ${canSpawn.reason}`,
+        );
+        results.push({
+          success: false,
+          error: `Diagnostic spawn throttled: ${canSpawn.reason}`,
+        });
+        continue;
+      }
+
       const result = await this.processHotspot(hotspot);
       results.push(result);
+
+      // Clean up old spawns periodically
+      if (results.length % 5 === 0) {
+        await throttler.cleanup();
+      }
     }
 
     return results;

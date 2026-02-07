@@ -150,6 +150,21 @@ export class Mutator {
    * Waits for the agent to complete and extracts any patches from tool calls.
    */
   async spawnDiagnosticAgent(hotspot: ToolHotspot): Promise<DiagnosticResult> {
+    // Check throttling before spawning
+    const { getDiagnosticThrottler } = await import("./diagnostic-throttler.js");
+    const throttler = getDiagnosticThrottler();
+    const canSpawn = await throttler.canSpawn(hotspot.toolName);
+
+    if (!canSpawn.allowed) {
+      log.warn(
+        `[mutator] Diagnostic agent spawn throttled for ${hotspot.toolName}: ${canSpawn.reason}`,
+      );
+      return {
+        toolName: hotspot.toolName,
+        rootCause: `Diagnostic agent spawn throttled: ${canSpawn.reason}`,
+      };
+    }
+
     // Get failing sessions for this tool
     const failingSessions = await getFailingToolSessions({
       toolName: hotspot.toolName,
@@ -175,9 +190,15 @@ export class Mutator {
 
     // Spawn sub-agent via gateway and wait for completion
     const cfg = loadConfig();
-    const childSessionKey = `agent:main:diagnostic:${Date.now()}`;
+    const childSessionKey = `agent:main:diagnostic:${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Get throttler config for timeout and thinking level
+    const diagConfig = throttler.getConfig();
 
     try {
+      // Record spawn
+      await throttler.recordSpawn(hotspot.toolName, childSessionKey);
+
       // Step 1: Spawn the diagnostic agent
       const spawnResult = await callGateway<{ runId: string; status: string }>({
         method: "agent",
@@ -186,7 +207,8 @@ export class Mutator {
           sessionKey: childSessionKey,
           idempotencyKey: `diag-${Date.now()}`,
           deliver: false,
-          timeout: 300, // 5 minute timeout
+          timeout: diagConfig.timeout, // Use throttler config (2 minutes default)
+          thinking: diagConfig.thinkingLevel, // Use throttler config (minimal default)
           label: `diagnostic-${hotspot.toolName}`,
         },
         timeoutMs: 10_000,
@@ -200,6 +222,7 @@ export class Mutator {
       }
 
       // Step 2: Wait for the agent to complete
+      const waitTimeout = diagConfig.timeout * 1000; // Convert to ms
       const waitResult = await callGateway<{
         status: "ok" | "error" | "timeout";
         error?: string;
@@ -207,9 +230,9 @@ export class Mutator {
         method: "agent.wait",
         params: {
           runId: spawnResult.runId,
-          timeoutMs: 300_000, // 5 minutes
+          timeoutMs: waitTimeout, // Use throttler config (2 minutes default)
         },
-        timeoutMs: 310_000,
+        timeoutMs: waitTimeout + 10_000,
       });
 
       if (waitResult?.status === "error") {
@@ -229,6 +252,9 @@ export class Mutator {
       // Step 3: Read session transcript to extract patches
       const patchResult = await this.extractPatchFromSession(childSessionKey);
 
+      // Record completion
+      await throttler.recordCompletion(childSessionKey);
+
       return {
         toolName: hotspot.toolName,
         rootCause: patchResult.rootCause ?? "Analysis complete",
@@ -236,6 +262,9 @@ export class Mutator {
         patchId: patchResult.patchId,
       };
     } catch (err) {
+      // Record completion even on error
+      await throttler.recordCompletion(childSessionKey).catch(() => {});
+
       return {
         toolName: hotspot.toolName,
         rootCause: `Failed to spawn diagnostic agent: ${err instanceof Error ? err.message : String(err)}`,
