@@ -2,11 +2,13 @@ import { Breeder } from "../agents/evolution/breeder.js";
 import { runDojoSuite, DOJO_TASKS } from "../agents/evolution/dojo.js";
 import { getGlobalEvolutionDaemon } from "../agents/evolution/evolution-daemon.js";
 import { loadGenotype, saveGenotype } from "../agents/evolution/genotype.js";
+import { listPatches } from "../agents/evolution/patches.js";
 import { getGlobalRecursiveImprover } from "../agents/evolution/recursive-improver.js";
 import { getGlobalTelemetryMonitor } from "../agents/evolution/telemetry-monitor.js";
 import { getAggregatedStats, readSessionStats } from "../agents/evolution/telemetry.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import { loadConfig } from "../config/config.js";
+import { cleanupObsoletePatches, fixFailedPatchErrors } from "./evolution-patch-cleanup.js";
 
 export async function cmdEvolution(args: {
   action:
