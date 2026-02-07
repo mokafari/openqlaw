@@ -118,6 +118,7 @@ export const CLAUDE_PARAM_GROUPS = {
     },
     {
       keys: ["newText", "new_string"],
+      allowEmpty: true,
       label: "newText (newText or new_string)",
     },
   ],
@@ -360,6 +361,43 @@ async function findSimilarTextContext(
 }
 
 /**
+ * Detect specific whitespace differences between expected and actual text.
+ * Returns a diagnostic message if whitespace issues are found.
+ */
+function diagnoseWhitespaceDifferences(expected: string, actual: string): string | null {
+  const issues: string[] = [];
+
+  // Check line ending differences
+  const expectedHasCRLF = expected.includes("\r\n");
+  const actualHasCRLF = actual.includes("\r\n");
+  if (expectedHasCRLF !== actualHasCRLF) {
+    issues.push(
+      expectedHasCRLF
+        ? "Your oldText uses CRLF (\\r\\n) but file uses LF (\\n)"
+        : "File uses CRLF (\\r\\n) but your oldText uses LF (\\n)",
+    );
+  }
+
+  // Check trailing whitespace on lines
+  const expectedLines = expected.split(/\r?\n/);
+  const actualLines = actual.split(/\r?\n/);
+  const expectedTrailing = expectedLines.some((l) => /\s$/.test(l));
+  const actualTrailing = actualLines.some((l) => /\s$/.test(l));
+  if (expectedTrailing !== actualTrailing) {
+    issues.push(
+      expectedTrailing
+        ? "Your oldText has trailing whitespace that may not exist in the file"
+        : "File has trailing whitespace that your oldText is missing",
+    );
+  }
+
+  if (issues.length > 0) {
+    return "\n\nWhitespace issues detected:\n- " + issues.join("\n- ");
+  }
+  return null;
+}
+
+/**
  * Enhanced edit tool wrapper that provides better error messages when text matching fails.
  */
 function wrapEditWithDiagnostics(tool: AnyAgentTool, root: string): AnyAgentTool {
@@ -379,6 +417,23 @@ function wrapEditWithDiagnostics(tool: AnyAgentTool, root: string): AnyAgentTool
           const oldText = record?.oldText ?? record?.old_string;
 
           if (typeof filePath === "string" && typeof oldText === "string") {
+            // Read the actual file content to diagnose the mismatch
+            try {
+              const absolutePath = pathResolve(root, filePath);
+              const actualContent = await readFile(absolutePath, "utf-8");
+
+              // Check for whitespace issues
+              const wsIssues = diagnoseWhitespaceDifferences(oldText, actualContent);
+              if (wsIssues) {
+                throw new Error(errorMsg + wsIssues);
+              }
+            } catch (readErr) {
+              // If reading failed for a different reason, continue with fuzzy matching
+              if (readErr instanceof Error && readErr.message.includes("Whitespace issues")) {
+                throw readErr;
+              }
+            }
+
             const context = await findSimilarTextContext(filePath, oldText, root);
             if (context) {
               throw new Error(errorMsg + context);
