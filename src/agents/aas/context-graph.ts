@@ -74,6 +74,7 @@ export interface CommitStatus {
   hasUserEmail: boolean;
   hasUserName: boolean;
   workingTreeClean: boolean | null;
+  reason?: string;
 }
 
 /**
@@ -84,6 +85,9 @@ export interface DeploymentStatus {
   hasDockerfile: boolean;
   hasDockerCli: boolean;
   dockerDaemonRunning: boolean | null;
+  reason?: string;
+  dockerVersion?: string;
+  deployTarget?: string;
 }
 
 // Cache for capability checks (cleared on workspace changes)
@@ -230,6 +234,7 @@ export class ContextGraph {
         hasUserEmail: false,
         hasUserName: false,
         workingTreeClean: null,
+        reason: "No workspace directory specified",
       };
     }
 
@@ -269,12 +274,21 @@ export class ContextGraph {
       }
     }
 
+    // Determine reason for failure
+    let reason: string | undefined;
+    if (!hasGitRepo) {
+      reason = "Not a git repository";
+    } else if (!hasUserEmail) {
+      reason = "Git user.email not configured";
+    }
+
     return {
       canCommit: hasGitRepo && hasUserEmail,
       hasGitRepo,
       hasUserEmail,
       hasUserName,
       workingTreeClean,
+      reason,
     };
   }
 
@@ -288,6 +302,7 @@ export class ContextGraph {
         hasDockerfile: false,
         hasDockerCli: false,
         dockerDaemonRunning: null,
+        reason: "No workspace directory specified",
       };
     }
 
@@ -296,7 +311,14 @@ export class ContextGraph {
     const hasDockerCli = await checkCli("docker");
 
     let dockerDaemonRunning: boolean | null = null;
+    let dockerVersion: string | undefined;
     if (hasDockerCli) {
+      try {
+        const { stdout } = await execAsync("docker --version", { timeout: 5000 });
+        dockerVersion = stdout.trim();
+      } catch {
+        // Version check failed, but CLI exists
+      }
       try {
         await execAsync("docker ps", { timeout: 5000 });
         dockerDaemonRunning = true;
@@ -305,11 +327,26 @@ export class ContextGraph {
       }
     }
 
+    // Determine reason for failure
+    let reason: string | undefined;
+    if (!hasDockerfile) {
+      reason = "No Dockerfile found in workspace";
+    } else if (!hasDockerCli) {
+      reason = "Docker CLI not available";
+    } else if (!dockerDaemonRunning) {
+      reason = "Docker daemon not running";
+    }
+
+    const canDeploy = hasDockerfile && hasDockerCli && dockerDaemonRunning === true;
+
     return {
-      canDeploy: hasDockerfile && hasDockerCli && dockerDaemonRunning === true,
+      canDeploy,
       hasDockerfile,
       hasDockerCli,
       dockerDaemonRunning,
+      reason,
+      dockerVersion,
+      deployTarget: canDeploy ? "docker" : undefined,
     };
   }
 
