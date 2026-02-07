@@ -8,7 +8,7 @@
 import type { WorkspaceBootstrapFile } from "../agents/workspace.js";
 import type { OpenClawConfig } from "../config/config.js";
 
-export type InternalHookEventType = "command" | "session" | "agent" | "gateway";
+export type InternalHookEventType = "command" | "session" | "agent" | "gateway" | "tool";
 
 export type AgentBootstrapHookContext = {
   workspaceDir: string;
@@ -178,4 +178,60 @@ export function isAgentBootstrapEvent(event: InternalHookEvent): event is AgentB
     return false;
   }
   return Array.isArray(context.bootstrapFiles);
+}
+
+// ────────────────────────────────────────────────────────────────
+// Tool Registration Hooks
+// ────────────────────────────────────────────────────────────────
+
+export type ToolRegistrationHookContext = {
+  toolName: string;
+  action: "register" | "unregister";
+  contextAreas?: string[];
+  source?: string; // e.g., "skill:imsg", "plugin:foo"
+};
+
+export type ToolRegistrationHookEvent = InternalHookEvent & {
+  type: "tool";
+  action: "registered" | "unregistered";
+  context: ToolRegistrationHookContext;
+};
+
+export function isToolRegistrationEvent(
+  event: InternalHookEvent,
+): event is ToolRegistrationHookEvent {
+  if (event.type !== "tool") {
+    return false;
+  }
+  if (event.action !== "registered" && event.action !== "unregistered") {
+    return false;
+  }
+  const context = event.context as Partial<ToolRegistrationHookContext> | null;
+  return Boolean(context && typeof context.toolName === "string");
+}
+
+/**
+ * Fire a tool registration hook event
+ */
+export async function triggerToolRegistrationHook(params: {
+  action: "register" | "unregister";
+  toolName: string;
+  contextAreas?: string[];
+  source?: string;
+}): Promise<void> {
+  const hookAction = params.action === "register" ? "registered" : "unregistered";
+  const event: ToolRegistrationHookEvent = {
+    type: "tool",
+    action: hookAction,
+    sessionKey: "system",
+    context: {
+      toolName: params.toolName,
+      action: params.action,
+      contextAreas: params.contextAreas,
+      source: params.source,
+    },
+    timestamp: new Date(),
+    messages: [],
+  };
+  await triggerInternalHook(event);
 }
