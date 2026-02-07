@@ -1,6 +1,9 @@
 /**
  * Gateway integration for evolution services.
  * Starts HealthMonitor and wires up build failure detection.
+ *
+ * @evolution Self-modified: 2026-02-07T11:38:00Z
+ * @test This comment proves self-modification works end-to-end
  */
 import type { OpenClawConfig } from "../../config/config.js";
 import { log } from "../pi-embedded-runner/logger.js";
