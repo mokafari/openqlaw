@@ -6,6 +6,7 @@
  */
 
 import type { SessionEntry } from "../../config/sessions/types.js";
+import type { ContextBudget } from "../context-budget.js";
 import type { ClusterId, ToolCluster } from "./types.js";
 
 export const TOOL_CLUSTERS: Record<ClusterId, ToolCluster> = {
@@ -82,7 +83,14 @@ export function getAllToolsInCluster(clusterId: ClusterId): string[] {
   return cluster?.tools ?? [];
 }
 
-export function resolveActiveClusters(sessionState?: SessionEntry): ClusterId[] {
+export function resolveActiveClusters(
+  sessionState?: SessionEntry,
+  budget?: ContextBudget,
+): ClusterId[] {
+  if (budget) {
+    return budget.activeClusters;
+  }
+
   // Default: return all clusters if no state
   if (!sessionState) {
     return Object.keys(TOOL_CLUSTERS) as ClusterId[];

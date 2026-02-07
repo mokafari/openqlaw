@@ -396,6 +396,33 @@ export async function runEmbeddedAttempt(
       log.debug(`Dynamic tool registry init failed (non-fatal): ${err}`);
     }
 
+    // Compute context budget based on FSM state (reduces prompt size per state)
+    let contextBudget: import("../../context-budget.js").ContextBudget | undefined;
+    try {
+      const { resolveContextBudget } = await import("../../context-budget.js");
+      const evolutionToolNames = [
+        "evolution_propose_patch",
+        "evolution_run_dojo_test",
+        "evolution_list_patches",
+        "rebuild_gateway",
+        "meta_learning",
+        "session_diff",
+      ];
+      const hasEvolutionTools = tools.some((t) =>
+        evolutionToolNames.includes(t.name.toLowerCase()),
+      );
+      contextBudget = resolveContextBudget({
+        fsmState,
+        goalStackDepth: quakeContext?.goalStack.getAll().length ?? 0,
+        hasEvolutionTools,
+        promptMode,
+        toolNames: tools.map((t) => t.name),
+      });
+    } catch {
+      // Non-fatal: budget failure = full prompt
+      contextBudget = undefined;
+    }
+
     const appendPrompt = await buildEmbeddedSystemPrompt({
       workspaceDir: effectiveWorkspace,
       defaultThinkLevel: params.thinkLevel,
@@ -426,6 +453,7 @@ export async function runEmbeddedAttempt(
       // Quake Bot integration params
       fsmState,
       goalStackSummary,
+      contextBudget,
     });
     const systemPromptReport = buildSystemPromptReport({
       source: "run",

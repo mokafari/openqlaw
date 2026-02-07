@@ -1,5 +1,6 @@
 import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
+import type { ContextBudget, ContextBudgetSection } from "./context-budget.js";
 import type { ResolvedTimeFormat } from "./date-time.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
@@ -221,6 +222,8 @@ export async function buildAgentSystemPrompt(params: {
   goalStackSummary?: string;
   /** Active tool clusters */
   activeClusters?: string[];
+  /** Context budget for FSM-aware section filtering */
+  contextBudget?: ContextBudget;
 }) {
   const coreToolSummaries: Record<string, string> = {
     read: "Read file contents",
@@ -354,6 +357,9 @@ export async function buildAgentSystemPrompt(params: {
   const messageChannelOptions = listDeliverableMessageChannels().join("|");
   const promptMode = params.promptMode ?? "full";
   const isMinimal = promptMode === "minimal" || promptMode === "none";
+  const budget = params.contextBudget;
+  const budgetOn = (section: ContextBudgetSection): boolean =>
+    !budget || budget.includeSections.has(section);
   const safetySection = [
     "## Safety",
     "You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.",
@@ -418,40 +424,47 @@ export async function buildAgentSystemPrompt(params: {
     "Use plain human language for narration unless in a technical context.",
     "",
     ...safetySection,
-    "## OpenClaw CLI Quick Reference",
-    "OpenClaw is controlled via subcommands. Do not invent commands.",
-    "To manage the Gateway daemon service (start/stop/restart):",
-    "- openclaw gateway status",
-    "- openclaw gateway start",
-    "- openclaw gateway stop",
-    "- openclaw gateway restart",
-    "If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
-    "",
-    ...skillsSection,
-    ...memorySection,
-    // Skip self-update for subagent/none modes
-    hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
-    hasGateway && !isMinimal
+    ...(budgetOn("cli_reference")
       ? [
-          "Get Updates (self-update) is ONLY allowed when the user explicitly asks for it.",
-          "Do not run config.apply or update.run unless the user explicitly requests an update or config change; if it's not explicit, ask first.",
-          "Actions: config.get, config.schema, config.apply (validate + write full config, then restart), update.run (update deps or git, then restart).",
-          "After restart, OpenClaw pings the last active session automatically.",
-        ].join("\n")
-      : "",
-    hasGateway && !isMinimal ? "" : "",
+          "## OpenClaw CLI Quick Reference",
+          "OpenClaw is controlled via subcommands. Do not invent commands.",
+          "To manage the Gateway daemon service (start/stop/restart):",
+          "- openclaw gateway status",
+          "- openclaw gateway start",
+          "- openclaw gateway stop",
+          "- openclaw gateway restart",
+          "If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
+          "",
+        ]
+      : []),
+    ...(budgetOn("skills") ? skillsSection : []),
+    ...(budgetOn("memory") ? memorySection : []),
+    // Skip self-update for subagent/none modes
+    ...(hasGateway && !isMinimal && budgetOn("self_update")
+      ? [
+          "## OpenClaw Self-Update",
+          [
+            "Get Updates (self-update) is ONLY allowed when the user explicitly asks for it.",
+            "Do not run config.apply or update.run unless the user explicitly requests an update or config change; if it's not explicit, ask first.",
+            "Actions: config.get, config.schema, config.apply (validate + write full config, then restart), update.run (update deps or git, then restart).",
+            "After restart, OpenClaw pings the last active session automatically.",
+          ].join("\n"),
+          "",
+        ]
+      : []),
     "",
     // Skip model aliases for subagent/none modes
-    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
-      ? "## Model Aliases"
-      : "",
-    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
-      ? "Prefer aliases when specifying model overrides; full provider/model is also accepted."
-      : "",
-    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
-      ? params.modelAliasLines.join("\n")
-      : "",
-    params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal ? "" : "",
+    ...(params.modelAliasLines &&
+    params.modelAliasLines.length > 0 &&
+    !isMinimal &&
+    budgetOn("model_aliases")
+      ? [
+          "## Model Aliases",
+          "Prefer aliases when specifying model overrides; full provider/model is also accepted.",
+          params.modelAliasLines.join("\n"),
+          "",
+        ]
+      : []),
     userTimezone
       ? "If you need the current date, time, or day of week, run session_status (📊 session_status)."
       : "",
@@ -460,7 +473,7 @@ export async function buildAgentSystemPrompt(params: {
     "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.",
     ...workspaceNotes,
     "",
-    ...docsSection,
+    ...(budgetOn("documentation") ? docsSection : []),
     params.sandboxInfo?.enabled ? "## Sandbox" : "",
     params.sandboxInfo?.enabled
       ? [
@@ -510,16 +523,18 @@ export async function buildAgentSystemPrompt(params: {
     "## Workspace Files (injected)",
     "These user-editable files are loaded by OpenClaw and included below in Project Context.",
     "",
-    ...buildReplyTagsSection(isMinimal),
-    ...buildMessagingSection({
-      isMinimal,
-      availableTools,
-      messageChannelOptions,
-      inlineButtonsEnabled,
-      runtimeChannel,
-      messageToolHints: params.messageToolHints,
-    }),
-    ...buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }),
+    ...(budgetOn("reply_tags") ? buildReplyTagsSection(isMinimal) : []),
+    ...(budgetOn("messaging")
+      ? buildMessagingSection({
+          isMinimal,
+          availableTools,
+          messageChannelOptions,
+          inlineButtonsEnabled,
+          runtimeChannel,
+          messageToolHints: params.messageToolHints,
+        })
+      : []),
+    ...(budgetOn("voice") ? buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }) : []),
   ];
 
   if (extraSystemPrompt) {
@@ -528,7 +543,7 @@ export async function buildAgentSystemPrompt(params: {
       promptMode === "minimal" ? "## Subagent Context" : "## Group Chat Context";
     lines.push(contextHeader, extraSystemPrompt, "");
   }
-  if (params.reactionGuidance) {
+  if (params.reactionGuidance && budgetOn("reactions")) {
     const { level, channel } = params.reactionGuidance;
     const guidanceText =
       level === "minimal"
@@ -603,8 +618,8 @@ export async function buildAgentSystemPrompt(params: {
     }
   }
 
-  // Skip silent replies for subagent/none modes
-  if (!isMinimal) {
+  // Skip silent replies for subagent/none modes or when budget excludes them
+  if (!isMinimal && budgetOn("silent_replies")) {
     lines.push(
       "## Silent Replies",
       `When you have nothing to say, respond with ONLY: ${SILENT_REPLY_TOKEN}`,
@@ -621,8 +636,8 @@ export async function buildAgentSystemPrompt(params: {
     );
   }
 
-  // Skip heartbeats for subagent/none modes
-  if (!isMinimal) {
+  // Skip heartbeats for subagent/none modes or when budget excludes them
+  if (!isMinimal && budgetOn("heartbeats")) {
     lines.push(
       "## Heartbeats",
       heartbeatPromptLine,
@@ -636,57 +651,56 @@ export async function buildAgentSystemPrompt(params: {
 
   // Add FSM state, goal stack, and cluster info if available
   const quakeBotSections: string[] = [];
+  const condensed = budget?.condensedQuake ?? false;
 
-  if (params.fsmState) {
+  if (params.fsmState && budgetOn("quake_fsm")) {
     try {
       const description = getStateDescription(params.fsmState as any);
-      quakeBotSections.push(
-        "## Agent State (FSM)",
-        `Current state: ${params.fsmState}`,
-        `Description: ${description}`,
-        "",
-        "**State Machine Behavior:**",
-        "- States represent your current operational mode (idle, planning, executing, camping, etc.)",
-        "- State transitions happen automatically based on your actions and system events",
-        "- When blocked by an obstacle, you may transition to 'retreating' to handle errors",
-        "- For long-running processes (builds, deployments), you can enter 'camping' state to wait for events",
-        "- Use the goal stack tools (goal_push/goal_pop/goal_status) to manage multi-step tasks with obstacles",
-        "",
-      );
+      if (condensed) {
+        quakeBotSections.push(`## Agent State: ${params.fsmState} — ${description}`, "");
+      } else {
+        quakeBotSections.push(
+          "## Agent State (FSM)",
+          `Current state: ${params.fsmState}`,
+          `Description: ${description}`,
+          "",
+          "**State Machine Behavior:**",
+          "- States represent your current operational mode (idle, planning, executing, camping, etc.)",
+          "- State transitions happen automatically based on your actions and system events",
+          "- When blocked by an obstacle, you may transition to 'retreating' to handle errors",
+          "- For long-running processes (builds, deployments), you can enter 'camping' state to wait for events",
+          "- Use the goal stack tools (goal_push/goal_pop/goal_status) to manage multi-step tasks with obstacles",
+          "",
+        );
+      }
     } catch {
-      // Fallback if state not recognized
+      quakeBotSections.push(`## Agent State: ${params.fsmState}`, "");
+    }
+  }
+
+  if (params.goalStackSummary && budgetOn("quake_goals")) {
+    if (condensed) {
+      quakeBotSections.push("## Goal Stack", params.goalStackSummary, "");
+    } else {
       quakeBotSections.push(
-        "## Agent State (FSM)",
-        `Current state: ${params.fsmState}`,
+        "## Goal Stack",
+        params.goalStackSummary,
         "",
-        "**State Machine Behavior:**",
-        "- States represent your current operational mode",
-        "- State transitions happen automatically based on your actions",
-        "- Use goal_push/goal_pop/goal_status tools to manage multi-step tasks",
+        "**Goal Stack Usage:**",
+        "- The goal stack is a LIFO (Last-In-First-Out) structure for recursive task resolution",
+        "- When you encounter an obstacle (e.g., 'Docker daemon not running'), push it as a sub-goal",
+        "- Solve the obstacle first, then pop it and resume the original goal",
+        "- Use goal_push to add new goals/subgoals, goal_pop to complete and remove goals",
+        "- Use goal_block to mark the current goal as blocked by an obstacle",
+        "- Use goal_unblock to clear a blocked goal after resolving the obstacle",
+        "- Use goal_status to view the current stack state (summary or full visualization)",
+        "- Example: 'Deploy app' → blocked by 'Docker not running' → goal_block('Docker not running') → push 'Start Docker' → solve → goal_unblock → pop → resume deployment",
         "",
       );
     }
   }
 
-  if (params.goalStackSummary) {
-    quakeBotSections.push(
-      "## Goal Stack",
-      params.goalStackSummary,
-      "",
-      "**Goal Stack Usage:**",
-      "- The goal stack is a LIFO (Last-In-First-Out) structure for recursive task resolution",
-      "- When you encounter an obstacle (e.g., 'Docker daemon not running'), push it as a sub-goal",
-      "- Solve the obstacle first, then pop it and resume the original goal",
-      "- Use goal_push to add new goals/subgoals, goal_pop to complete and remove goals",
-      "- Use goal_block to mark the current goal as blocked by an obstacle",
-      "- Use goal_unblock to clear a blocked goal after resolving the obstacle",
-      "- Use goal_status to view the current stack state (summary or full visualization)",
-      "- Example: 'Deploy app' → blocked by 'Docker not running' → goal_block('Docker not running') → push 'Start Docker' → solve → goal_unblock → pop → resume deployment",
-      "",
-    );
-  }
-
-  if (params.activeClusters && params.activeClusters.length > 0) {
+  if (params.activeClusters && params.activeClusters.length > 0 && budgetOn("quake_clusters")) {
     quakeBotSections.push(
       "## Active Tool Clusters",
       `Currently active: ${params.activeClusters.join(", ")}`,
@@ -696,7 +710,7 @@ export async function buildAgentSystemPrompt(params: {
   }
 
   // Add Quake Bot Engine capabilities section if any Quake features are active
-  if (params.fsmState || params.goalStackSummary) {
+  if ((params.fsmState || params.goalStackSummary) && budgetOn("quake_capabilities")) {
     quakeBotSections.push(
       "## Quake Bot Engine Capabilities",
       "",
@@ -732,80 +746,88 @@ export async function buildAgentSystemPrompt(params: {
       ].includes(name.toLowerCase()),
     ) ?? false;
 
-  if (hasEvolutionTools) {
-    quakeBotSections.push(
-      "## Self-Modification & Evolution",
-      "",
-      "**Self-Modification Capabilities:**",
-      "- You have access to evolution tools for autonomous self-improvement",
-      "- Use evolution_propose_patch to generate code patches for identified issues or improvements",
-      "- Use evolution_run_dojo_test to validate changes against the Dojo evaluation suite",
-      "- Use evolution_list_patches to view pending and applied patches",
-      "- Use rebuild_gateway to rebuild and restart the gateway after making code changes",
-      "",
-      "**Self-Patching Workflow (Full Cycle):**",
-      "You can now perform complete self-patching cycles:",
-      "  1. **Detect**: Identify issues through errors, telemetry, or user feedback",
-      "  2. **Edit**: Use read/write/edit/apply_patch tools to modify source files",
-      "  3. **Build**: Run `pnpm build` or use rebuild_gateway to compile changes",
-      "  4. **Restart**: Use rebuild_gateway or gateway tool to restart the gateway",
-      "  5. **Survive**: The system maintains session state across restarts",
-      "",
-      "**When to Use Self-Modification:**",
-      "- Fix identified bugs or performance issues in your own code",
-      "- Optimize functions to reduce token usage or improve efficiency",
-      "- Add new capabilities based on telemetry and user feedback",
-      "- Always validate changes with Dojo tests before applying",
-      "- After making code changes, rebuild and restart to apply them",
-      "",
-      "**Automatic Recovery System:**",
-      "- The system includes automatic recovery for build failures and system errors",
-      "- When build failures occur, the recovery system:",
-      "  1. Parses errors from build logs (TypeScript, compilation errors)",
-      "  2. Classifies errors and determines recovery strategy",
-      "  3. Spawns diagnostic agents to analyze root causes",
-      "  4. Attempts automatic fixes with retries and backups",
-      "  5. Validates fixes by rebuilding and verifying the build succeeds",
-      "  6. Alerts you if recovery fails after maximum attempts",
-      "- Recovery state is persisted and can resume after restarts",
-      "- Recovery integrates with the evolution system for continuous improvement",
-      "- The watch script (gateway:watch) monitors builds and triggers recovery automatically",
-      "",
-      "**Health Monitoring:**",
-      "- The system runs hourly health checks on the gateway",
-      "- If the gateway is unhealthy, a diagnostic agent is automatically spawned",
-      "- Health checks verify gateway reachability and target connectivity",
-      "",
-      "**Evolution & Recovery Workflow:**",
-      "- Telemetry tracks tool error rates and identifies hotspots",
-      "- Hotspots trigger diagnostic analysis and patch proposals",
-      "- Patches are validated through policy guards and Dojo tests",
-      "- Successful patches improve system performance over time",
-      "- Recovery attempts are logged for learning and refinement",
-      "- Build failures are automatically detected and recovery is attempted",
-      "",
-      "**Meta-Learning Capabilities:**",
-      "- Use meta_learning tool to log predictions before tasks and outcomes after completion",
-      "- Track calibration metrics to improve prediction accuracy over time",
-      "- Access learning journal entries to review what worked and what failed",
-      "- Analyze patterns across sessions to identify recurring issues and successful strategies",
-      "- Knowledge synthesis automatically extracts insights from telemetry and journal entries",
-      "",
-      "**Session Diff & Behavioral Analysis:**",
-      "- Use session_diff tool to compare sessions semantically (not just text diff)",
-      "- Identify divergence points where behavior differed between sessions",
-      "- Detect behavioral shifts: error rate changes, latency regressions, tool usage patterns",
-      "- Extract reusable patterns and insights from session comparisons",
-      "- Actions: compare (two sessions), compare_latest (recent sessions), highlight (formatted report), extract_pattern (insights)",
-      "",
-      "**Safety:**",
-      "- Self-modification is gated by policy guardrails",
-      "- Critical safety files are protected from modification",
-      "- All changes are validated in the Dojo harness before application",
-      "- Recovery has maximum retry limits to prevent infinite loops",
-      "- Backups are created before recovery attempts for rollback capability",
-      "",
-    );
+  if (hasEvolutionTools && budgetOn("quake_evolution")) {
+    if (condensed) {
+      quakeBotSections.push(
+        "## Self-Modification & Evolution",
+        "Self-modification tools available. Use evolution_propose_patch, evolution_run_dojo_test, evolution_list_patches, rebuild_gateway, meta_learning, session_diff.",
+        "",
+      );
+    } else {
+      quakeBotSections.push(
+        "## Self-Modification & Evolution",
+        "",
+        "**Self-Modification Capabilities:**",
+        "- You have access to evolution tools for autonomous self-improvement",
+        "- Use evolution_propose_patch to generate code patches for identified issues or improvements",
+        "- Use evolution_run_dojo_test to validate changes against the Dojo evaluation suite",
+        "- Use evolution_list_patches to view pending and applied patches",
+        "- Use rebuild_gateway to rebuild and restart the gateway after making code changes",
+        "",
+        "**Self-Patching Workflow (Full Cycle):**",
+        "You can now perform complete self-patching cycles:",
+        "  1. **Detect**: Identify issues through errors, telemetry, or user feedback",
+        "  2. **Edit**: Use read/write/edit/apply_patch tools to modify source files",
+        "  3. **Build**: Run `pnpm build` or use rebuild_gateway to compile changes",
+        "  4. **Restart**: Use rebuild_gateway or gateway tool to restart the gateway",
+        "  5. **Survive**: The system maintains session state across restarts",
+        "",
+        "**When to Use Self-Modification:**",
+        "- Fix identified bugs or performance issues in your own code",
+        "- Optimize functions to reduce token usage or improve efficiency",
+        "- Add new capabilities based on telemetry and user feedback",
+        "- Always validate changes with Dojo tests before applying",
+        "- After making code changes, rebuild and restart to apply them",
+        "",
+        "**Automatic Recovery System:**",
+        "- The system includes automatic recovery for build failures and system errors",
+        "- When build failures occur, the recovery system:",
+        "  1. Parses errors from build logs (TypeScript, compilation errors)",
+        "  2. Classifies errors and determines recovery strategy",
+        "  3. Spawns diagnostic agents to analyze root causes",
+        "  4. Attempts automatic fixes with retries and backups",
+        "  5. Validates fixes by rebuilding and verifying the build succeeds",
+        "  6. Alerts you if recovery fails after maximum attempts",
+        "- Recovery state is persisted and can resume after restarts",
+        "- Recovery integrates with the evolution system for continuous improvement",
+        "- The watch script (gateway:watch) monitors builds and triggers recovery automatically",
+        "",
+        "**Health Monitoring:**",
+        "- The system runs hourly health checks on the gateway",
+        "- If the gateway is unhealthy, a diagnostic agent is automatically spawned",
+        "- Health checks verify gateway reachability and target connectivity",
+        "",
+        "**Evolution & Recovery Workflow:**",
+        "- Telemetry tracks tool error rates and identifies hotspots",
+        "- Hotspots trigger diagnostic analysis and patch proposals",
+        "- Patches are validated through policy guards and Dojo tests",
+        "- Successful patches improve system performance over time",
+        "- Recovery attempts are logged for learning and refinement",
+        "- Build failures are automatically detected and recovery is attempted",
+        "",
+        "**Meta-Learning Capabilities:**",
+        "- Use meta_learning tool to log predictions before tasks and outcomes after completion",
+        "- Track calibration metrics to improve prediction accuracy over time",
+        "- Access learning journal entries to review what worked and what failed",
+        "- Analyze patterns across sessions to identify recurring issues and successful strategies",
+        "- Knowledge synthesis automatically extracts insights from telemetry and journal entries",
+        "",
+        "**Session Diff & Behavioral Analysis:**",
+        "- Use session_diff tool to compare sessions semantically (not just text diff)",
+        "- Identify divergence points where behavior differed between sessions",
+        "- Detect behavioral shifts: error rate changes, latency regressions, tool usage patterns",
+        "- Extract reusable patterns and insights from session comparisons",
+        "- Actions: compare (two sessions), compare_latest (recent sessions), highlight (formatted report), extract_pattern (insights)",
+        "",
+        "**Safety:**",
+        "- Self-modification is gated by policy guardrails",
+        "- Critical safety files are protected from modification",
+        "- All changes are validated in the Dojo harness before application",
+        "- Recovery has maximum retry limits to prevent infinite loops",
+        "- Backups are created before recovery attempts for rollback capability",
+        "",
+      );
+    }
   }
 
   if (quakeBotSections.length > 0) {

@@ -1,6 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
+import type { ContextBudget } from "../context-budget.js";
 import type { ResolvedTimeFormat } from "../date-time.js";
 import type { EmbeddedContextFile } from "../pi-embedded-helpers.js";
 import type { EmbeddedSandboxInfo } from "./types.js";
@@ -55,6 +56,8 @@ export async function buildEmbeddedSystemPrompt(params: {
   goalStackSummary?: string;
   /** Active tool clusters for Quake Bot integration */
   activeClusters?: string[];
+  /** Context budget for FSM-aware section filtering */
+  contextBudget?: ContextBudget;
 }): Promise<string> {
   const basePrompt = await buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
@@ -85,6 +88,7 @@ export async function buildEmbeddedSystemPrompt(params: {
     fsmState: params.fsmState,
     goalStackSummary: params.goalStackSummary,
     activeClusters: params.activeClusters,
+    contextBudget: params.contextBudget,
   });
 
   // Apply evolution genotype modifications (non-blocking, falls back gracefully)

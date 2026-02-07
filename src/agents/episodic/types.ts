@@ -57,7 +57,7 @@ export type EpisodicMemoryConfig = {
 };
 
 export const DEFAULT_EPISODIC_CONFIG: EpisodicMemoryConfig = {
-  enabled: false,
+  enabled: true,
   maxEpisodes: 5000,
   episodeTtlDays: 180,
   maxEntities: 10_000,
