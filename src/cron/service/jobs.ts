@@ -85,6 +85,14 @@ export function recomputeNextRuns(state: CronServiceState) {
       );
       job.state.runningAtMs = undefined;
     }
+    // Preserve nextRunAtMs if the job is already due (nextRunAtMs <= now).
+    // recomputeNextRuns is called on every timer tick via ensureLoaded(forceReload),
+    // and computeJobNextRunAtMs always returns a value >= now, which would push
+    // a due job's nextRunAtMs into the future before runDueJobs can see it.
+    const existingNext = job.state.nextRunAtMs;
+    if (typeof existingNext === "number" && existingNext <= now) {
+      continue;
+    }
     job.state.nextRunAtMs = computeJobNextRunAtMs(job, now);
   }
 }

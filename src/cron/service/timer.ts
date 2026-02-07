@@ -25,12 +25,12 @@ export function armTimer(state: CronServiceState) {
   const delay = Math.max(nextAt - now, 0);
   console.error(
     "[CRON-DEBUG] armTimer: nextAt=",
-    nextAt,
-    "=",
     new Date(nextAt).toISOString(),
     "delay=",
     delay,
-    "ms",
+    "ms =",
+    Math.round(delay / 1000),
+    "seconds",
   );
   // Avoid TimeoutOverflowWarning when a job is far in the future.
   const clampedDelay = Math.min(delay, MAX_TIMEOUT_MS);
@@ -43,7 +43,6 @@ export function armTimer(state: CronServiceState) {
 }
 
 export async function onTimer(state: CronServiceState) {
-  // Direct file write to prove this function is called
   try {
     fs.appendFileSync(
       "/tmp/cron-timer-debug.log",
@@ -51,8 +50,8 @@ export async function onTimer(state: CronServiceState) {
     );
   } catch {}
   console.error("[CRON-DEBUG]", new Date().toISOString(), "🚨 CRON TIMER FIRED - onTimer called");
-  state.deps.log.error({ ts: new Date().toISOString() }, "🚨 CRON TIMER FIRED");
   if (state.running) {
+    console.error("[CRON-DEBUG] onTimer: already running, skipping");
     return;
   }
   state.running = true;
@@ -74,69 +73,48 @@ export async function runDueJobs(state: CronServiceState) {
     return;
   }
   const now = state.deps.nowMs();
-
-  console.error("[CRON-DEBUG] runDueJobs called - now:", now, "jobs:", state.store.jobs.length);
-
-  // Debug: Log when checking for due jobs
-  state.deps.log.info(
-    {
-      now,
-      jobCount: state.store.jobs.length,
-      enabledCount: state.store.jobs.filter((j) => j.enabled).length,
-    },
-    "cron: checking for due jobs",
+  console.error(
+    "[CRON-DEBUG] runDueJobs called - now:",
+    new Date(now).toISOString(),
+    "jobs:",
+    state.store.jobs.length,
   );
 
   const due = state.store.jobs.filter((j) => {
     if (!j.enabled) {
-      console.error("[CRON-DEBUG] Skipping disabled job:", j.name);
       return false;
     }
     if (typeof j.state.runningAtMs === "number") {
-      console.error("[CRON-DEBUG] Skipping running job:", j.name);
       return false;
     }
     const next = j.state.nextRunAtMs;
     const isDue = typeof next === "number" && now >= next;
 
-    // Log first 3 jobs to see what's happening
-    const jobIndex = state.store.jobs.indexOf(j);
-    if (jobIndex < 3) {
+    // Log first 3 enabled jobs to see timing
+    const enabledJobs = state.store!.jobs.filter((x) => x.enabled);
+    const jobIndex = enabledJobs.indexOf(j);
+    if (jobIndex >= 0 && jobIndex < 3) {
+      const gap = next ? next - now : null;
       console.error(
         `[CRON-DEBUG] Job[${jobIndex}]:`,
         j.name,
         "next:",
-        next,
-        "now:",
-        now,
+        next ? new Date(next).toISOString() : "null",
         "due:",
         isDue,
         "gap:",
-        next ? next - now : "null",
-      );
-    }
-
-    // Debug: Log why jobs aren't due
-    if (!isDue && typeof next === "number") {
-      state.deps.log.info(
-        { job: j.name, next, now, gap: next - now, gapMs: next - now },
-        "cron: job not due yet",
+        gap ? `${Math.round(gap / 1000)}s` : "null",
       );
     }
 
     return isDue;
   });
 
-  // Debug: Log how many due jobs found
   console.error(
     "[CRON-DEBUG] Found",
     due.length,
     "due jobs:",
     due.map((j) => j.name),
-  );
-  state.deps.log.info(
-    { dueCount: due.length, dueJobs: due.map((j) => j.name) },
-    "cron: found due jobs",
   );
 
   for (const job of due) {
