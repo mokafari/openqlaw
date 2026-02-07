@@ -4,3 +4,4 @@ export * from "./breeder.js";
 export * from "./dojo.js";
 export * from "./hooks.js";
 export * from "./integration.js";
+export * from "./gateway-integration.js";

@@ -5,6 +5,10 @@ import type { RuntimeEnv } from "../runtime.js";
 import type { ControlUiRootState } from "./control-ui.js";
 import type { startBrowserControlServerIfEnabled } from "./server-browser.js";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  startEvolutionServices,
+  stopEvolutionServices,
+} from "../agents/evolution/gateway-integration.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
@@ -459,6 +463,9 @@ export async function startGatewayServer(
 
   let heartbeatRunner = startHeartbeatRunner({ cfg: cfgAtStart });
 
+  // Start evolution services (HealthMonitor, auto-recovery)
+  startEvolutionServices(cfgAtStart);
+
   void cron.start().catch((err) => logCron.error(`failed to start: ${String(err)}`));
 
   const execApprovalManager = new ExecApprovalManager();
@@ -624,6 +631,7 @@ export async function startGatewayServer(
 
   return {
     close: async (opts) => {
+      stopEvolutionServices();
       if (diagnosticsEnabled) {
         stopDiagnosticHeartbeat();
       }
