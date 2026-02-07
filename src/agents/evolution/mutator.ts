@@ -147,6 +147,7 @@ export class Mutator {
 
   /**
    * Spawn a diagnostic agent to analyze a tool failure.
+   * Waits for the agent to complete and extracts any patches from tool calls.
    */
   async spawnDiagnosticAgent(hotspot: ToolHotspot): Promise<DiagnosticResult> {
     // Get failing sessions for this tool
@@ -172,27 +173,67 @@ export class Mutator {
       workspaceDir: this.workspaceDir,
     });
 
-    // Spawn sub-agent via gateway
+    // Spawn sub-agent via gateway and wait for completion
     const cfg = loadConfig();
-    const agentId = "main"; // Default agent for diagnostic tasks
+    const childSessionKey = `agent:main:diagnostic:${Date.now()}`;
 
     try {
-      const result = await callGateway({
+      // Step 1: Spawn the diagnostic agent
+      const spawnResult = await callGateway<{ runId: string; status: string }>({
         method: "agent",
         params: {
-          sessionId: `agent:${agentId}:subagent:${Date.now()}`,
           message: prompt,
-          workspaceDir: this.workspaceDir,
+          sessionKey: childSessionKey,
+          idempotencyKey: `diag-${Date.now()}`,
+          deliver: false,
+          timeout: 300, // 5 minute timeout
+          label: `diagnostic-${hotspot.toolName}`,
         },
+        timeoutMs: 10_000,
       });
 
-      // Extract diagnostic result from agent response
-      // In a real implementation, the agent would use apply_patch tool
-      // and we'd extract the patch from the tool call result
+      if (!spawnResult?.runId) {
+        return {
+          toolName: hotspot.toolName,
+          rootCause: "Failed to spawn diagnostic agent - no runId returned",
+        };
+      }
+
+      // Step 2: Wait for the agent to complete
+      const waitResult = await callGateway<{
+        status: "ok" | "error" | "timeout";
+        error?: string;
+      }>({
+        method: "agent.wait",
+        params: {
+          runId: spawnResult.runId,
+          timeoutMs: 300_000, // 5 minutes
+        },
+        timeoutMs: 310_000,
+      });
+
+      if (waitResult?.status === "error") {
+        return {
+          toolName: hotspot.toolName,
+          rootCause: `Diagnostic agent failed: ${waitResult.error ?? "unknown error"}`,
+        };
+      }
+
+      if (waitResult?.status === "timeout") {
+        return {
+          toolName: hotspot.toolName,
+          rootCause: "Diagnostic agent timed out",
+        };
+      }
+
+      // Step 3: Read session transcript to extract patches
+      const patchResult = await this.extractPatchFromSession(childSessionKey);
+
       return {
         toolName: hotspot.toolName,
-        rootCause: "Analysis pending", // Would extract from agent response
-        proposedFix: undefined, // Would extract from agent response
+        rootCause: patchResult.rootCause ?? "Analysis complete",
+        proposedFix: patchResult.patch,
+        patchId: patchResult.patchId,
       };
     } catch (err) {
       return {
@@ -200,6 +241,115 @@ export class Mutator {
         rootCause: `Failed to spawn diagnostic agent: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  /**
+   * Extract patch content from a session's tool calls.
+   * Looks for apply_patch, edit, or evolution_propose_patch tool calls.
+   */
+  private async extractPatchFromSession(
+    sessionKey: string,
+  ): Promise<{ patch?: string; patchId?: string; rootCause?: string }> {
+    try {
+      // Read session history to find tool calls
+      const historyResult = await callGateway<{
+        messages?: Array<{
+          role: string;
+          content: unknown;
+        }>;
+      }>({
+        method: "sessions.history",
+        params: {
+          sessionKey,
+          includeTools: true,
+          limit: 50,
+        },
+        timeoutMs: 10_000,
+      });
+
+      if (!historyResult?.messages) {
+        return { rootCause: "No messages in session" };
+      }
+
+      // Look for tool calls in assistant messages
+      for (const msg of historyResult.messages) {
+        if (msg.role !== "assistant") continue;
+
+        const content = Array.isArray(msg.content) ? msg.content : [];
+        for (const block of content) {
+          const blockObj = block as { type?: string; name?: string; input?: unknown };
+          if (blockObj.type !== "tool_use") continue;
+
+          // Check for apply_patch tool
+          if (blockObj.name === "apply_patch") {
+            const input = blockObj.input as { patch?: string } | undefined;
+            if (input?.patch) {
+              return { patch: input.patch };
+            }
+          }
+
+          // Check for evolution_propose_patch tool
+          if (blockObj.name === "evolution_propose_patch") {
+            const input = blockObj.input as { patch?: string; rationale?: string } | undefined;
+            if (input?.patch) {
+              return { patch: input.patch, rootCause: input.rationale };
+            }
+          }
+
+          // Check for edit tool (extract the change)
+          if (blockObj.name === "edit" || blockObj.name === "Edit") {
+            const input = blockObj.input as
+              | {
+                  file_path?: string;
+                  path?: string;
+                  old_string?: string;
+                  oldText?: string;
+                  new_string?: string;
+                  newText?: string;
+                }
+              | undefined;
+            if (input) {
+              const filePath = input.file_path ?? input.path;
+              const oldText = input.old_string ?? input.oldText;
+              const newText = input.new_string ?? input.newText;
+              if (filePath && oldText && newText) {
+                // Convert edit to patch format
+                const patch = this.editToPatch(filePath, oldText, newText);
+                return { patch };
+              }
+            }
+          }
+        }
+      }
+
+      return { rootCause: "No patch found in session tool calls" };
+    } catch (err) {
+      return {
+        rootCause: `Failed to extract patch: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /**
+   * Convert an edit operation to apply_patch format.
+   */
+  private editToPatch(filePath: string, oldText: string, newText: string): string {
+    const oldLines = oldText.split("\n");
+    const newLines = newText.split("\n");
+
+    let patch = `*** Begin Patch\n`;
+    patch += `*** Update File: ${filePath}\n`;
+    patch += `@@@ -1,${oldLines.length} +1,${newLines.length} @@@\n`;
+
+    for (const line of oldLines) {
+      patch += `-${line}\n`;
+    }
+    for (const line of newLines) {
+      patch += `+${line}\n`;
+    }
+
+    patch += `*** End Patch`;
+    return patch;
   }
 
   /**
