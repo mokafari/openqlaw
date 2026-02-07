@@ -72,6 +72,11 @@ export function recomputeNextRuns(state: CronServiceState) {
       job.state.runningAtMs = undefined;
       continue;
     }
+    // Backfill anchorMs for "every" schedules to prevent drift on restart.
+    // Use createdAtMs if available, otherwise current time.
+    if (job.schedule.kind === "every" && !job.schedule.anchorMs) {
+      job.schedule.anchorMs = job.createdAtMs ?? now;
+    }
     const runningAt = job.state.runningAtMs;
     if (typeof runningAt === "number" && now - runningAt > STUCK_RUN_MS) {
       state.deps.log.warn(
@@ -106,6 +111,13 @@ export function createJob(state: CronServiceState, input: CronJobCreate): CronJo
         ? true
         : undefined;
   const enabled = typeof input.enabled === "boolean" ? input.enabled : true;
+  // For "every" schedules without explicit anchorMs, use creation time as anchor
+  // to prevent schedule drift on gateway restarts.
+  const schedule =
+    input.schedule.kind === "every" && !input.schedule.anchorMs
+      ? { ...input.schedule, anchorMs: now }
+      : input.schedule;
+
   const job: CronJob = {
     id,
     agentId: normalizeOptionalAgentId(input.agentId),
@@ -115,7 +127,7 @@ export function createJob(state: CronServiceState, input: CronJobCreate): CronJo
     deleteAfterRun,
     createdAtMs: now,
     updatedAtMs: now,
-    schedule: input.schedule,
+    schedule,
     sessionTarget: input.sessionTarget,
     wakeMode: input.wakeMode,
     payload: input.payload,
