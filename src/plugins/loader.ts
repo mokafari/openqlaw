@@ -454,3 +454,28 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   initializeGlobalHookRunner(registry);
   return registry;
 }
+
+/**
+ * Clear the plugin registry cache and reset active registry.
+ * Useful for hot-reload scenarios where plugins need to be re-evaluated.
+ * Note: This only clears OpenClaw's cache; jiti may still have compiled modules cached.
+ * For full reload, a gateway restart is recommended.
+ *
+ * @returns Number of cache entries cleared
+ */
+export function clearPluginCache(): number {
+  const count = registryCache.size;
+  registryCache.clear();
+  setActivePluginRegistry(null as unknown as PluginRegistry, undefined);
+  return count;
+}
+
+/**
+ * Get cache statistics for debugging/monitoring.
+ */
+export function getPluginCacheStats(): { size: number; keys: string[] } {
+  return {
+    size: registryCache.size,
+    keys: Array.from(registryCache.keys()),
+  };
+}

@@ -12,6 +12,7 @@ import { getGlobalDynamicRegistry } from "./tools/dynamic-registry.js";
 import {
   createDynamicToolCreatorTool,
   createDynamicToolRemoverTool,
+  createListDynamicToolsTool,
 } from "./tools/dynamic-tool-creator.js";
 import { createEpisodicRecallTool } from "./tools/episodic-recall-tool.js";
 import {
@@ -31,6 +32,7 @@ import {
 import { createImageTool } from "./tools/image-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
+import { createSessionDiffTool } from "./tools/session-diff.js";
 import { createSessionStatusTool } from "./tools/session-status-tool.js";
 import { createSessionsHistoryTool } from "./tools/sessions-history-tool.js";
 import { createSessionsListTool } from "./tools/sessions-list-tool.js";
@@ -203,6 +205,7 @@ export function createOpenClawTools(options?: {
         sessionKey: options?.agentSessionKey,
       }),
       createMetaLearningTool(),
+      createSessionDiffTool(),
     );
   }
 
@@ -216,10 +219,14 @@ export function createOpenClawTools(options?: {
     tools.push(episodicRecallTool);
   }
 
-  // Dynamic tool creation/removal (gated behind evolution or fuzzyModelSelection)
+  // Dynamic tool creation/removal/listing (gated behind evolution or fuzzyModelSelection)
   const dynamicEnabled = evolutionEnabled || (options?.config?.tools?.fuzzyModelSelection ?? false);
   if (dynamicEnabled) {
-    tools.push(createDynamicToolCreatorTool(), createDynamicToolRemoverTool());
+    tools.push(
+      createDynamicToolCreatorTool(),
+      createDynamicToolRemoverTool(),
+      createListDynamicToolsTool(),
+    );
   }
 
   // Include any already-registered dynamic tools

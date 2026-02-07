@@ -37,12 +37,19 @@ Example:
         Type.Object({}, { additionalProperties: true, description: "JSON Schema for tool input" }),
       ),
       handler: Type.String({ description: "JavaScript function body (receives 'params')" }),
+      update: Type.Optional(
+        Type.Boolean({
+          description:
+            "If true, replace existing tool with same name instead of failing. Default: false",
+        }),
+      ),
     }),
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
       const name = typeof params.name === "string" ? params.name.trim() : "";
       const description = typeof params.description === "string" ? params.description.trim() : "";
       const handler = typeof params.handler === "string" ? params.handler.trim() : "";
+      const update = params.update === true;
       const parameters = (params.parameters as Record<string, unknown>) ?? {
         type: "object",
         properties: {},
@@ -59,12 +66,20 @@ Example:
       }
 
       const registry = getGlobalDynamicRegistry();
+      const existed = registry.has(name);
 
-      if (registry.has(name)) {
-        return jsonResult({ error: `Tool "${name}" already exists. Remove it first.` });
+      if (existed && !update) {
+        return jsonResult({
+          error: `Tool "${name}" already exists. Use update=true to replace it, or remove_tool first.`,
+        });
       }
 
       try {
+        // Remove existing if updating
+        if (existed) {
+          registry.unregisterTool(name);
+        }
+
         const definition = {
           name,
           description,
@@ -78,8 +93,11 @@ Example:
 
         return jsonResult({
           ok: true,
-          message: `Tool "${name}" created and available for use.`,
+          message: existed
+            ? `Tool "${name}" updated and ready for use.`
+            : `Tool "${name}" created and available for use.`,
           toolName: name,
+          updated: existed,
         });
       } catch (err) {
         return jsonResult({ error: String(err) });
@@ -116,6 +134,50 @@ export function createDynamicToolRemoverTool(): AnyAgentTool {
       return jsonResult({
         ok: true,
         message: `Tool "${name}" removed.`,
+      });
+    },
+  };
+}
+
+export function createListDynamicToolsTool(): AnyAgentTool {
+  return {
+    name: "list_dynamic_tools",
+    label: "List Dynamic Tools",
+    description:
+      "List all currently registered dynamic tools created via create_tool. Shows name, description, and creation time.",
+    parameters: Type.Object({
+      verbose: Type.Optional(
+        Type.Boolean({
+          description: "If true, include handler code in the output. Default: false",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, args) => {
+      const params = args as Record<string, unknown>;
+      const verbose = params.verbose === true;
+
+      const registry = getGlobalDynamicRegistry();
+      const definitions = registry.listDefinitions();
+
+      if (definitions.length === 0) {
+        return jsonResult({
+          count: 0,
+          tools: [],
+          message: "No dynamic tools registered. Use create_tool to create one.",
+        });
+      }
+
+      const tools = definitions.map((def) => ({
+        name: def.name,
+        description: def.description,
+        createdAt: new Date(def.createdAt).toISOString(),
+        createdBy: def.createdBy,
+        ...(verbose ? { handler: def.handlerCode, parameters: def.parameters } : {}),
+      }));
+
+      return jsonResult({
+        count: tools.length,
+        tools,
       });
     },
   };
