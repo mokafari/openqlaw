@@ -5,7 +5,7 @@
  * and build change attribution reports.
  */
 
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
@@ -85,10 +85,11 @@ export class GitTools {
 
   /**
    * Run a git command and return output.
+   * Uses execFileSync to avoid shell interpretation of special characters.
    */
   private runGit(args: string[]): string {
     try {
-      return execSync(`git ${args.join(" ")}`, {
+      return execFileSync("git", args, {
         cwd: this.repoPath,
         encoding: "utf-8",
         timeout: this.timeout,
