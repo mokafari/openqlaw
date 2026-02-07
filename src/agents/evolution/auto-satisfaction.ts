@@ -43,14 +43,35 @@ export type SatisfactionSignals = {
 /**
  * Derive satisfaction score from observable signals.
  *
- * Formula: Satisfaction = (0.4 * G) + (0.3 * P) + (0.3 * E)
+ * Formula: Satisfaction = (wG * G) + (wP * P) + (wE * E)
  * Where:
  * - G = Goal completion score (0.0 - 1.0)
  * - P = Pattern fitness score (0.0 - 1.0)
  * - E = Execution quality score (0.0 - 1.0)
+ *
+ * Weights are dynamically adjusted: when goals or patterns are not tracked,
+ * execution quality gets more weight to avoid penalizing good execution
+ * when we simply lack signal data.
  */
 export function deriveSatisfactionScore(signals: SatisfactionSignals): number {
-  const weights = { goal: 0.4, pattern: 0.3, execution: 0.3 };
+  const hasGoals = signals.goals && signals.goals.initial.length > 0;
+  const hasPatterns = signals.similarPatterns && signals.similarPatterns.length > 0;
+
+  // Dynamic weights: redistribute from missing signals
+  // When all signals available: balanced weights
+  // When signals missing: adjust to avoid penalizing good execution
+  let weights = { goal: 0.4, pattern: 0.3, execution: 0.3 };
+
+  if (!hasGoals && !hasPatterns) {
+    // No goal or pattern data: rely primarily on execution quality
+    weights = { goal: 0.1, pattern: 0.1, execution: 0.8 };
+  } else if (!hasGoals) {
+    // No goal data: shift goal weight to pattern and execution
+    weights = { goal: 0.1, pattern: 0.4, execution: 0.5 };
+  } else if (!hasPatterns) {
+    // No pattern data: goal completion is primary signal
+    weights = { goal: 0.65, pattern: 0.1, execution: 0.25 };
+  }
 
   // --- Goal Completion Score (G) ---
   const G = calculateGoalScore(signals.goals);
