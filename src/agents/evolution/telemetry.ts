@@ -231,7 +231,8 @@ export async function getAggregatedStats(params?: {
  * These are filtered from error rate calculations.
  */
 const EXPECTED_ERROR_PATTERNS = [
-  /^Command exited with non-zero status/i,
+  /^Command exited with code \d+/i, // Non-zero exit codes (fixed pattern)
+  /^Command exited with non-zero status/i, // Alternative format (keep for compatibility)
   /^ENOENT.*(?:\.env|\.git|node_modules)/i, // Expected missing files
   /^not-due$/i, // Cron job not ready to run
 ] as const;
