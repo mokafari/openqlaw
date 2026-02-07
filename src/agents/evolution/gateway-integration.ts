@@ -4,6 +4,7 @@
  *
  * @evolution Self-modified: 2026-02-07T11:38:00Z
  * @test This comment proves self-modification works end-to-end
+ * @verified Full mutation workflow tested: 2026-02-07T11:46:00Z
  */
 import type { OpenClawConfig } from "../../config/config.js";
 import { log } from "../pi-embedded-runner/logger.js";
