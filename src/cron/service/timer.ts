@@ -18,9 +18,20 @@ export function armTimer(state: CronServiceState) {
   }
   const nextAt = nextWakeAtMs(state);
   if (!nextAt) {
+    console.error("[CRON-DEBUG] armTimer: no nextAt");
     return;
   }
-  const delay = Math.max(nextAt - state.deps.nowMs(), 0);
+  const now = state.deps.nowMs();
+  const delay = Math.max(nextAt - now, 0);
+  console.error(
+    "[CRON-DEBUG] armTimer: nextAt=",
+    nextAt,
+    "=",
+    new Date(nextAt).toISOString(),
+    "delay=",
+    delay,
+    "ms",
+  );
   // Avoid TimeoutOverflowWarning when a job is far in the future.
   const clampedDelay = Math.min(delay, MAX_TIMEOUT_MS);
   state.timer = setTimeout(() => {

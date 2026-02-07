@@ -95,10 +95,20 @@ export function nextWakeAtMs(state: CronServiceState) {
   if (enabled.length === 0) {
     return undefined;
   }
-  return enabled.reduce(
+  const result = enabled.reduce(
     (min, j) => Math.min(min, j.state.nextRunAtMs as number),
     enabled[0].state.nextRunAtMs as number,
   );
+  console.error(
+    "[CRON-DEBUG] nextWakeAtMs:",
+    result,
+    "=",
+    new Date(result).toISOString(),
+    "from",
+    enabled.length,
+    "enabled jobs",
+  );
+  return result;
 }
 
 export function createJob(state: CronServiceState, input: CronJobCreate): CronJob {
