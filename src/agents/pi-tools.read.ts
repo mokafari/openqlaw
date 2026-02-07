@@ -1,6 +1,6 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { createEditTool, createReadTool, createWriteTool } from "@mariozechner/pi-coding-agent";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { resolve as pathResolve } from "path";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { detectMime } from "../media/mime.js";
@@ -409,10 +409,32 @@ export function createOpenClawReadTool(base: AnyAgentTool): AnyAgentTool {
         normalized ??
         (params && typeof params === "object" ? (params as Record<string, unknown>) : undefined);
       assertRequiredParams(record, CLAUDE_PARAM_GROUPS.read, base.name);
+
+      // Pre-check: detect if path is a directory before passing to upstream tool
+      // This prevents the cryptic EISDIR error from the upstream library
+      const filePath = record?.path;
+      if (typeof filePath === "string" && filePath.trim()) {
+        try {
+          const stats = await stat(filePath);
+          if (stats.isDirectory()) {
+            throw new Error(
+              `Cannot read '${filePath}': path is a directory. Use 'ls' or 'find' to list directory contents, or specify a file path.`,
+            );
+          }
+        } catch (err) {
+          // If stat fails with ENOENT, let the upstream tool handle it (it has better error messages)
+          // Only re-throw our directory error
+          if (err instanceof Error && err.message.includes("is a directory")) {
+            throw err;
+          }
+          // For other errors (ENOENT, EACCES, etc.), fall through to upstream
+        }
+      }
+
       const result = await base.execute(toolCallId, normalized ?? params, signal);
-      const filePath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
-      const normalizedResult = await normalizeReadImageResult(result, filePath);
-      return sanitizeToolResultImages(normalizedResult, `read:${filePath}`);
+      const resolvedPath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
+      const normalizedResult = await normalizeReadImageResult(result, resolvedPath);
+      return sanitizeToolResultImages(normalizedResult, `read:${resolvedPath}`);
     },
   };
 }
