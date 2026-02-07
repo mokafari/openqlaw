@@ -600,6 +600,18 @@ export const ToolsSchema = z
           })
           .strict()
           .optional(),
+        episodic: z
+          .object({
+            enabled: z.boolean().optional(),
+            maxEpisodes: z.number().int().positive().optional(),
+            episodeTtlDays: z.number().int().positive().optional(),
+            maxEntities: z.number().int().positive().optional(),
+            graphDepth: z.number().int().positive().max(10).optional(),
+            stateWeighting: z.boolean().optional(),
+            goalWeighting: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

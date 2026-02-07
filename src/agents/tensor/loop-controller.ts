@@ -27,6 +27,9 @@ export type LoopControllerParams = {
   patternStore: PatternStore;
   embeddingProvider: EmbeddingProvider;
   config: TensorConfig;
+  /** Optional episodic stores for cross-feed recording. */
+  episodeStore?: import("../episodic/episode-store.js").EpisodeStore;
+  knowledgeGraph?: import("../episodic/knowledge-graph.js").KnowledgeGraph;
 };
 
 /**
@@ -48,6 +51,8 @@ export class NeuroSymbolicLoopController {
   private config: TensorConfig;
   private recoveryEngine: RecoveryEngine;
   private metaLearning: MetaLearningSystem;
+  private episodeStore?: import("../episodic/episode-store.js").EpisodeStore;
+  private knowledgeGraph?: import("../episodic/knowledge-graph.js").KnowledgeGraph;
 
   constructor(params: LoopControllerParams) {
     this.fsmManager = params.fsmManager;
@@ -57,6 +62,8 @@ export class NeuroSymbolicLoopController {
     this.config = params.config;
     this.recoveryEngine = new RecoveryEngine();
     this.metaLearning = new MetaLearningSystem();
+    this.episodeStore = params.episodeStore;
+    this.knowledgeGraph = params.knowledgeGraph;
   }
 
   // --- Phase 1: PLAN ---
@@ -153,6 +160,46 @@ export class NeuroSymbolicLoopController {
       }
     }
 
+    // Cross-feed: episode recording alongside pattern recording
+    if (this.episodeStore && this.knowledgeGraph) {
+      try {
+        const { recordEpisode } = await import("../episodic/episode-recorder.js");
+        const { DEFAULT_EPISODIC_CONFIG } = await import("../episodic/types.js");
+        await recordEpisode({
+          store: this.episodeStore,
+          graph: this.knowledgeGraph,
+          embeddingProvider: this.embeddingProvider,
+          config: DEFAULT_EPISODIC_CONFIG,
+          sessionId: `loop-${Date.now()}`,
+          prompt: runParams.prompt,
+          toolMetas: runParams.toolMetas,
+          success: runParams.success,
+          aborted: false,
+          durationMs: runParams.durationMs,
+          tokenUsage: runParams.tokenUsage.total,
+          fsmState: runParams.fsmState ?? this.fsmManager.getState(),
+          contextDepth: 0,
+          activeGoals: this.goalStack.getAll().map((g) => g.description),
+          fitness: calculateFitness({
+            sessionId: `loop-${Date.now()}`,
+            timestamp: Date.now(),
+            success: runParams.success,
+            aborted: false,
+            tokenUsage: runParams.tokenUsage,
+            toolCalls: runParams.toolCallCount,
+            durationMs: runParams.durationMs,
+            model: "unknown",
+            provider: "unknown",
+          }),
+          genotypeId: runParams.genotypeId,
+        });
+      } catch (err) {
+        log.debug(
+          `Episodic cross-feed failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     // Log meta-learning outcome
     try {
       const taskId = `loop-${Date.now()}`;
@@ -204,6 +251,15 @@ export class NeuroSymbolicLoopController {
       patternRecorded,
       fitness,
     };
+  }
+
+  /** Wire episodic stores for cross-feed recording (called after deferred init). */
+  setEpisodicStores(
+    store: import("../episodic/episode-store.js").EpisodeStore,
+    graph: import("../episodic/knowledge-graph.js").KnowledgeGraph,
+  ): void {
+    this.episodeStore = store;
+    this.knowledgeGraph = graph;
   }
 
   /** Get the current FSM state. */

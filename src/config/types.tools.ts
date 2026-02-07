@@ -512,5 +512,22 @@ export type ToolsConfig = {
       /** Minimum fitness score for pattern recall (default: 0.7). */
       minFitnessForRecall?: number;
     };
+    /** Episodic knowledge graph memory — cross-session structured recall. */
+    episodic?: {
+      /** Enable episodic memory and knowledge graph (default: false). */
+      enabled?: boolean;
+      /** Maximum number of stored episodes (default: 5000). */
+      maxEpisodes?: number;
+      /** Days before unused episodes are pruned (default: 180). */
+      episodeTtlDays?: number;
+      /** Maximum number of knowledge graph entities (default: 10000). */
+      maxEntities?: number;
+      /** Max graph traversal depth for recall expansion (default: 3). */
+      graphDepth?: number;
+      /** Weight recall results by FSM state match (default: true). */
+      stateWeighting?: boolean;
+      /** Weight recall results by goal overlap (default: true). */
+      goalWeighting?: boolean;
+    };
   };
 };

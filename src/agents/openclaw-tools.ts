@@ -13,6 +13,7 @@ import {
   createDynamicToolCreatorTool,
   createDynamicToolRemoverTool,
 } from "./tools/dynamic-tool-creator.js";
+import { createEpisodicRecallTool } from "./tools/episodic-recall-tool.js";
 import {
   createEvolutionProposePatchTool,
   createEvolutionRunDojoTestTool,
@@ -203,6 +204,16 @@ export function createOpenClawTools(options?: {
       }),
       createMetaLearningTool(),
     );
+  }
+
+  // Episodic recall tool (gated behind episodic config)
+  const episodicRecallTool = createEpisodicRecallTool({
+    config: options?.config,
+    agentDir: options?.agentDir,
+    agentSessionKey: options?.agentSessionKey,
+  });
+  if (episodicRecallTool) {
+    tools.push(episodicRecallTool);
   }
 
   // Dynamic tool creation/removal (gated behind evolution or fuzzyModelSelection)

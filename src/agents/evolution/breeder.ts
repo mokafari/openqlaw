@@ -1,6 +1,7 @@
 import type { AgentGenotype } from "./genotype.js";
 import type { SessionStatsEntry } from "./telemetry.js";
 import { interbreedGenotypes, mutateGenotype, loadGenotype, saveGenotype } from "./genotype.js";
+import { MutationWorkflow, type MutationResult } from "./mutation-workflow.js";
 import { Mutator, type MutationCycleResult } from "./mutator.js";
 import { getAggregatedStats, readSessionStats } from "./telemetry.js";
 
@@ -217,13 +218,78 @@ export class Breeder {
   /**
    * Run a mutation cycle: identify hotspots, diagnose, propose fixes, validate, and apply.
    * This can be called before or after a regular evolution cycle to fix bugs in the codebase.
+   * Uses MutationWorkflow for comprehensive self-modification with system recovery.
    */
-  async runMutationCycle(): Promise<MutationCycleResult> {
+  async runMutationCycle(): Promise<{
+    results: MutationResult[];
+    summary: {
+      total: number;
+      successful: number;
+      failed: number;
+      systemRecoveries: number;
+    };
+  }> {
     const mutator = new Mutator({
       statsDir: this.statsDir,
       policyPath: this.policyPath,
       workspaceDir: this.workspaceDir,
     });
-    return mutator.runMutationCycle();
+
+    const workflow = new MutationWorkflow(mutator, this.workspaceDir);
+    const results = await workflow.run();
+
+    const summary = {
+      total: results.length,
+      successful: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      systemRecoveries: results.filter((r) => r.success && !r.patchId).length, // System recoveries don't have patchId
+    };
+
+    return { results, summary };
+  }
+
+  /**
+   * Run evolution cycle with automatic mutation if error rates are high.
+   * This combines genotype evolution with code mutation for comprehensive self-improvement.
+   */
+  async evolveWithMutations(params?: {
+    baseGenotypeId?: string;
+    populationSize?: number;
+    mutationRate?: number;
+    autoMutate?: boolean;
+    mutationThreshold?: number; // Error rate threshold to trigger mutations
+  }): Promise<{
+    evolution: EvolutionResult;
+    mutations?: {
+      results: MutationResult[];
+      summary: { total: number; successful: number; failed: number; systemRecoveries: number };
+    };
+  }> {
+    // First, run regular evolution
+    const evolution = await this.evolve({
+      baseGenotypeId: params?.baseGenotypeId,
+      populationSize: params?.populationSize,
+      mutationRate: params?.mutationRate,
+    });
+
+    // Check if we should run mutations
+    if (params?.autoMutate) {
+      const mutator = new Mutator({
+        statsDir: this.statsDir,
+        policyPath: this.policyPath,
+        workspaceDir: this.workspaceDir,
+      });
+
+      const threshold = params.mutationThreshold ?? 0.2; // 20% default
+      const hotspots = await mutator.identifyHotspots({ threshold });
+
+      if (hotspots.length > 0) {
+        // Run mutation cycle to fix code issues
+        const mutations = await this.runMutationCycle();
+        return { evolution, mutations };
+      }
+    }
+
+    return { evolution };
   }
 }

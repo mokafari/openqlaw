@@ -971,6 +971,52 @@ export async function runEmbeddedAttempt(
                 log.debug(`Tensor pattern recording failed (non-fatal): ${err}`);
               });
           }
+
+          // Record episode for episodic memory (non-fatal, fire-and-forget)
+          if (
+            quakeContext.episodeStore &&
+            quakeContext.knowledgeGraph &&
+            quakeContext.embeddingProvider
+          ) {
+            const epStore = quakeContext.episodeStore;
+            const epGraph = quakeContext.knowledgeGraph;
+            const epEmbed = quakeContext.embeddingProvider;
+            const epFsmState = quakeContext.fsmManager.getState();
+            const epGoals = quakeContext.goalStack.getAll().map((g) => g.description);
+            const runSuccess = !aborted && !promptError;
+            const normalizedMetas = toolMetas
+              .filter(
+                (t): t is { toolName: string; meta?: string } => typeof t.toolName === "string",
+              )
+              .map((t) => ({ toolName: t.toolName, meta: t.meta }));
+            Promise.all([
+              import("../../episodic/episode-recorder.js"),
+              import("../../episodic/types.js"),
+            ])
+              .then(([{ recordEpisode }, { DEFAULT_EPISODIC_CONFIG }]) =>
+                recordEpisode({
+                  store: epStore,
+                  graph: epGraph,
+                  embeddingProvider: epEmbed,
+                  config: { ...DEFAULT_EPISODIC_CONFIG },
+                  sessionId: sessionIdUsed ?? params.sessionId,
+                  prompt: params.prompt,
+                  toolMetas: normalizedMetas,
+                  success: runSuccess,
+                  aborted: !!aborted,
+                  durationMs: 0,
+                  tokenUsage: 0,
+                  fsmState: epFsmState,
+                  contextDepth: 0,
+                  activeGoals: epGoals,
+                  fitness: 0.5,
+                  genotypeId: undefined,
+                }),
+              )
+              .catch((err) => {
+                log.debug(`Episodic recording failed (non-fatal): ${err}`);
+              });
+          }
         }
         params.abortSignal?.removeEventListener?.("abort", onAbort);
       }

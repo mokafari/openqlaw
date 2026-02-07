@@ -33,6 +33,11 @@ export type QuakeIntegrationContext = {
   patternStore?: import("./tensor/pattern-store.js").PatternStore;
   tensorRouter?: import("./tensor/router.js").TensorRouter;
   loopController?: import("./tensor/loop-controller.js").NeuroSymbolicLoopController;
+  /** Episodic knowledge graph memory (initialised when episodic config is enabled). */
+  episodeStore?: import("./episodic/episode-store.js").EpisodeStore;
+  knowledgeGraph?: import("./episodic/knowledge-graph.js").KnowledgeGraph;
+  /** Embedding provider shared by tensor + episodic (initialised when either is enabled). */
+  embeddingProvider?: import("../memory/embeddings.js").EmbeddingProvider;
 };
 
 /**
@@ -98,6 +103,7 @@ export async function initializeQuakeIntegration(params: {
   let patternStore: import("./tensor/pattern-store.js").PatternStore | undefined;
   let tensorRouter: import("./tensor/router.js").TensorRouter | undefined;
   let loopController: import("./tensor/loop-controller.js").NeuroSymbolicLoopController | undefined;
+  let sharedEmbeddingProvider: import("../memory/embeddings.js").EmbeddingProvider | undefined;
   try {
     const cfg = loadConfig();
     const tensorCfg = cfg.tools?.evolution?.tensor;
@@ -124,6 +130,7 @@ export async function initializeQuakeIntegration(params: {
         model: "text-embedding-3-small",
         fallback: "local",
       });
+      sharedEmbeddingProvider = embResult.provider;
 
       tensorRouter = new TensorRouter({
         store: patternStore,
@@ -137,10 +144,61 @@ export async function initializeQuakeIntegration(params: {
         patternStore,
         embeddingProvider: embResult.provider,
         config: resolvedCfg,
+        // Episodic stores will be wired after episodic init (below)
       });
     }
   } catch {
     // Tensor init is non-fatal
+  }
+
+  // Initialize episodic knowledge graph memory if enabled
+  let episodeStore: import("./episodic/episode-store.js").EpisodeStore | undefined;
+  let knowledgeGraph: import("./episodic/knowledge-graph.js").KnowledgeGraph | undefined;
+  try {
+    const cfg = loadConfig();
+    const episodicCfg = cfg.tools?.evolution?.episodic;
+    if (episodicCfg?.enabled) {
+      const { EpisodeStore: EpisodeStoreCls } = await import("./episodic/episode-store.js");
+      const { KnowledgeGraph: KnowledgeGraphCls } = await import("./episodic/knowledge-graph.js");
+      const { DEFAULT_EPISODIC_CONFIG } = await import("./episodic/types.js");
+      const nodePath = await import("node:path");
+      const { DatabaseSync: DbSync } = await import("node:sqlite");
+
+      const agentDir = params.sessionDir;
+      const dbPath = nodePath.join(agentDir, "episodic", "memory.db");
+      const resolvedCfg = { ...DEFAULT_EPISODIC_CONFIG, ...episodicCfg };
+
+      episodeStore = new EpisodeStoreCls(dbPath, resolvedCfg);
+      await episodeStore.initVec().catch(() => {
+        // sqlite-vec optional — brute-force cosine fallback
+      });
+
+      // KnowledgeGraph shares the same DB file (WAL handles concurrent access)
+      const graphDb = new DbSync(dbPath);
+      graphDb.exec("PRAGMA journal_mode=WAL");
+      graphDb.exec("PRAGMA busy_timeout=5000");
+      knowledgeGraph = new KnowledgeGraphCls(graphDb, resolvedCfg);
+
+      // Ensure embedding provider is available for episodic recording
+      if (!sharedEmbeddingProvider) {
+        const { createEmbeddingProvider } = await import("../memory/embeddings.js");
+        const embResult = await createEmbeddingProvider({
+          config: cfg,
+          agentDir,
+          provider: "auto",
+          model: "text-embedding-3-small",
+          fallback: "local",
+        });
+        sharedEmbeddingProvider = embResult.provider;
+      }
+    }
+  } catch {
+    // Episodic init is non-fatal
+  }
+
+  // Wire episodic stores into loop controller for cross-feed recording
+  if (loopController && episodeStore && knowledgeGraph) {
+    loopController.setEpisodicStores(episodeStore, knowledgeGraph);
   }
 
   return {
@@ -154,6 +212,9 @@ export async function initializeQuakeIntegration(params: {
     patternStore,
     tensorRouter,
     loopController,
+    episodeStore,
+    knowledgeGraph,
+    embeddingProvider: sharedEmbeddingProvider,
   };
 }
 

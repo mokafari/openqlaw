@@ -74,3 +74,72 @@ export async function applyCurrentGenotypeToPrompt(basePrompt: string): Promise<
     return basePrompt;
   }
 }
+
+/**
+ * Check telemetry after agent run and trigger diagnostic state if error rates are high.
+ * This should be called after logAgentRunTelemetry to enable automatic self-improvement.
+ */
+export async function checkTelemetryAndTriggerDiagnostic(params?: {
+  statsDir?: string;
+  workspaceDir?: string;
+  fsmStateManager?: {
+    transitionTo: (state: string, metadata?: Record<string, unknown>) => Promise<boolean>;
+  };
+  autoMutate?: boolean;
+}): Promise<{
+  triggered: boolean;
+  hotspots: Array<{ toolName: string; errorRate: number }>;
+  diagnosticState?: string;
+}> {
+  try {
+    const { getGlobalTelemetryMonitor } = await import("./telemetry-monitor.js");
+    const monitor = getGlobalTelemetryMonitor({
+      statsDir: params?.statsDir,
+      workspaceDir: params?.workspaceDir,
+      autoMutate: params?.autoMutate ?? false,
+    });
+
+    // Check current telemetry state
+    const result = await monitor.check();
+
+    if (!result.shouldTriggerDiagnostic) {
+      return { triggered: false, hotspots: [] };
+    }
+
+    logDebug(
+      `[evolution] High tool error rate detected: ${result.hotspots.length} hotspot(s). Triggering diagnostic state.`,
+    );
+
+    // Transition to diagnostic state if FSM manager provided
+    let diagnosticState: string | undefined;
+    if (params?.fsmStateManager) {
+      const transitioned = await params.fsmStateManager.transitionTo("diagnostic", {
+        hotspots: result.hotspots,
+        triggeredAt: Date.now(),
+        reason: "high_tool_error_rate",
+      });
+      if (transitioned) {
+        diagnosticState = "diagnostic";
+        logDebug(`[evolution] Transitioned to diagnostic state due to high error rates`);
+      }
+    }
+
+    // Optionally trigger automatic mutation cycle
+    if (result.shouldTriggerMutation && params?.autoMutate) {
+      logDebug(`[evolution] Auto-mutation enabled, triggering mutation cycle...`);
+      monitor.triggerMutationCycle().catch((err) => {
+        logDebug(`[evolution] Auto-mutation cycle failed: ${String(err)}`);
+      });
+    }
+
+    return {
+      triggered: true,
+      hotspots: result.hotspots.map((h) => ({ toolName: h.toolName, errorRate: h.errorRate })),
+      diagnosticState,
+    };
+  } catch (err) {
+    // Don't fail agent runs if telemetry check fails
+    logDebug(`[evolution] Failed to check telemetry: ${String(err)}`);
+    return { triggered: false, hotspots: [] };
+  }
+}

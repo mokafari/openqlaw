@@ -680,7 +680,8 @@ export async function runEmbeddedPiAgent(
 
           // Log evolution telemetry (non-blocking)
           try {
-            const { logAgentRunTelemetry } = await import("../evolution/integration.js");
+            const { logAgentRunTelemetry, checkTelemetryAndTriggerDiagnostic } =
+              await import("../evolution/integration.js");
             await logAgentRunTelemetry({
               sessionId: sessionIdUsed,
               sessionKey: params.sessionKey,
@@ -701,6 +702,14 @@ export async function runEmbeddedPiAgent(
               toolErrors: attempt.toolErrors,
             }).catch((err) => {
               log.debug(`evolution telemetry failed: ${String(err)}`);
+            });
+
+            // Check telemetry and trigger diagnostic state if error rates are high (non-blocking)
+            checkTelemetryAndTriggerDiagnostic({
+              workspaceDir: params.workspaceDir,
+              autoMutate: false, // Disable auto-mutation for now (can be enabled via config)
+            }).catch((err) => {
+              log.debug(`evolution telemetry check failed: ${String(err)}`);
             });
           } catch {
             // Evolution module not available or failed to load - ignore
