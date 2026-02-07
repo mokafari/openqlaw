@@ -17,6 +17,8 @@ export type DiagnosticThrottleConfig = {
   maxPerHour?: number;
   maxConcurrent?: number;
   minDelayBetweenMs?: number;
+  /** Exponential backoff multiplier for repeated failures on same tool */
+  backoffMultiplier?: number;
   timeoutMs?: number;
   thinkingLevel?: "minimal" | "low" | "medium" | "high";
   maxTimeoutsPerTool?: number;
@@ -27,6 +29,7 @@ const DEFAULT_CONFIG: Required<DiagnosticThrottleConfig> = {
   maxPerHour: 3,
   maxConcurrent: 1,
   minDelayBetweenMs: 300_000, // 5 minutes
+  backoffMultiplier: 2.0,
   timeoutMs: 120_000, // 2 minutes
   thinkingLevel: "minimal",
   maxTimeoutsPerTool: 2,
@@ -44,6 +47,7 @@ type DiagnosticSpawnRecord = {
 
 export class DiagnosticThrottler {
   private readonly config: Required<DiagnosticThrottleConfig>;
+  private readonly toolBackoff: Map<string, number> = new Map();
   private readonly stateFile: string;
   private activeSpawns: Map<string, DiagnosticSpawnRecord> = new Map();
   private lastSpawnTime: number = 0;
@@ -83,6 +87,24 @@ export class DiagnosticThrottler {
     }
 
     return { canProceed: true };
+  }
+
+  /**
+   * Get the current backoff delay for a tool based on failure history.
+   * Resets after a successful diagnostic.
+   */
+  getToolBackoffMs(toolName: string): number {
+    const factor = this.toolBackoff.get(toolName) ?? 1;
+    return this.config.minDelayBetweenMs * factor;
+  }
+
+  /**
+   * Record a diagnostic outcome for backoff adjustment.
+   */
+  recordDiagnosticOutcome(toolName: string, success: boolean): void {
+    const current = this.toolBackoff.get(toolName) ?? 1;
+    const next = success ? 1 : Math.min(current * this.config.backoffMultiplier, 8);
+    this.toolBackoff.set(toolName, next);
   }
 
   /**
