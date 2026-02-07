@@ -280,7 +280,7 @@ function wrapSandboxPathGuard(tool: AnyAgentTool, root: string): AnyAgentTool {
 
 export function createSandboxedReadTool(root: string) {
   const base = createReadTool(root) as unknown as AnyAgentTool;
-  return wrapSandboxPathGuard(createOpenClawReadTool(base), root);
+  return wrapSandboxPathGuard(createOpenClawReadTool(base, root), root);
 }
 
 export function createSandboxedWriteTool(root: string) {
@@ -399,7 +399,7 @@ export function createSandboxedEditTool(root: string) {
   return wrapSandboxPathGuard(withDiagnostics, root);
 }
 
-export function createOpenClawReadTool(base: AnyAgentTool): AnyAgentTool {
+export function createOpenClawReadTool(base: AnyAgentTool, root?: string): AnyAgentTool {
   const patched = patchToolSchemaForClaudeCompatibility(base);
   return {
     ...patched,
@@ -412,13 +412,18 @@ export function createOpenClawReadTool(base: AnyAgentTool): AnyAgentTool {
 
       // Pre-check: detect if path is a directory before passing to upstream tool
       // This prevents the cryptic EISDIR error from the upstream library
-      const filePath = record?.path;
+      const rawPath = record?.path;
+      // Resolve path relative to root if provided (fixes EISDIR/ENOENT when path is relative)
+      const filePath =
+        typeof rawPath === "string" && rawPath.trim() && root
+          ? pathResolve(root, rawPath)
+          : rawPath;
       if (typeof filePath === "string" && filePath.trim()) {
         try {
           const stats = await stat(filePath);
           if (stats.isDirectory()) {
             throw new Error(
-              `Cannot read '${filePath}': path is a directory. Use 'ls' or 'find' to list directory contents, or specify a file path.`,
+              `Cannot read '${rawPath}': path is a directory. Use 'ls' or 'find' to list directory contents, or specify a file path.`,
             );
           }
         } catch (err) {
