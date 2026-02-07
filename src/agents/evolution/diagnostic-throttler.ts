@@ -26,7 +26,7 @@ export type DiagnosticThrottleConfig = {
 };
 
 const DEFAULT_CONFIG: Required<DiagnosticThrottleConfig> = {
-  maxPerHour: 3,
+  maxPerHour: 10,
   maxConcurrent: 1,
   minDelayBetweenMs: 300_000, // 5 minutes
   backoffMultiplier: 2.0,
