@@ -38,6 +38,8 @@ export class TelemetryMonitor {
   private intervalId?: NodeJS.Timeout;
   private lastCheckTime: number = 0;
   private isRunning: boolean = false;
+  /** Track last logged hotspots to avoid spam - only log on changes */
+  private lastLoggedHotspots: Map<string, { errorRate: number; errorCount: number }> = new Map();
 
   constructor(config: TelemetryMonitorConfig = {}) {
     this.config = {
@@ -118,14 +120,33 @@ export class TelemetryMonitor {
       const shouldTriggerMutation =
         this.config.autoMutate && hotspots.length > 0 && hotspots.some((h) => h.errorRate >= 0.3); // 30%+ for auto-mutation
 
-      if (shouldTriggerDiagnostic) {
-        log.warn(
-          `[telemetry-monitor] Detected ${hotspots.length} tool hotspot(s) with error rate >= ${(this.config.errorRateThreshold * 100).toFixed(1)}%`,
-        );
-        for (const hotspot of hotspots) {
+      // Only log if hotspot status actually changed (new/resolved/rate changed significantly)
+      const changes = this.detectHotspotChanges(hotspots);
+      if (changes.hasChanges) {
+        if (changes.newHotspots.length > 0) {
           log.warn(
-            `[telemetry-monitor]   - ${hotspot.toolName}: ${(hotspot.errorRate * 100).toFixed(1)}% (${hotspot.errorCount}/${hotspot.totalCalls} calls)`,
+            `[telemetry-monitor] New hotspot(s) detected: ${changes.newHotspots.map((h) => `${h.toolName} (${(h.errorRate * 100).toFixed(1)}%)`).join(", ")}`,
           );
+        }
+        if (changes.resolvedHotspots.length > 0) {
+          log.info(
+            `[telemetry-monitor] Hotspot(s) resolved: ${changes.resolvedHotspots.join(", ")}`,
+          );
+        }
+        if (changes.rateChanges.length > 0) {
+          for (const change of changes.rateChanges) {
+            log.warn(
+              `[telemetry-monitor] ${change.toolName} error rate changed: ${(change.oldRate * 100).toFixed(1)}% -> ${(change.newRate * 100).toFixed(1)}%`,
+            );
+          }
+        }
+        // Update tracked state
+        this.lastLoggedHotspots.clear();
+        for (const hotspot of hotspots) {
+          this.lastLoggedHotspots.set(hotspot.toolName, {
+            errorRate: hotspot.errorRate,
+            errorCount: hotspot.errorCount,
+          });
         }
       }
 
@@ -142,6 +163,57 @@ export class TelemetryMonitor {
         shouldTriggerMutation: false,
       };
     }
+  }
+
+  /**
+   * Detect changes in hotspot status compared to last logged state.
+   * Returns info about new hotspots, resolved hotspots, and significant rate changes.
+   */
+  private detectHotspotChanges(
+    currentHotspots: Array<{ toolName: string; errorRate: number; errorCount: number }>,
+  ): {
+    hasChanges: boolean;
+    newHotspots: Array<{ toolName: string; errorRate: number }>;
+    resolvedHotspots: string[];
+    rateChanges: Array<{ toolName: string; oldRate: number; newRate: number }>;
+  } {
+    const newHotspots: Array<{ toolName: string; errorRate: number }> = [];
+    const rateChanges: Array<{ toolName: string; oldRate: number; newRate: number }> = [];
+    const currentNames = new Set(currentHotspots.map((h) => h.toolName));
+
+    // Check for new hotspots and rate changes
+    for (const hotspot of currentHotspots) {
+      const prev = this.lastLoggedHotspots.get(hotspot.toolName);
+      if (!prev) {
+        newHotspots.push({ toolName: hotspot.toolName, errorRate: hotspot.errorRate });
+      } else {
+        // Significant rate change: >5 percentage points or >20% relative change
+        const rateDiff = Math.abs(hotspot.errorRate - prev.errorRate);
+        const relativeChange = prev.errorRate > 0 ? rateDiff / prev.errorRate : rateDiff;
+        if (rateDiff > 0.05 || relativeChange > 0.2) {
+          rateChanges.push({
+            toolName: hotspot.toolName,
+            oldRate: prev.errorRate,
+            newRate: hotspot.errorRate,
+          });
+        }
+      }
+    }
+
+    // Check for resolved hotspots
+    const resolvedHotspots: string[] = [];
+    for (const [toolName] of this.lastLoggedHotspots) {
+      if (!currentNames.has(toolName)) {
+        resolvedHotspots.push(toolName);
+      }
+    }
+
+    return {
+      hasChanges: newHotspots.length > 0 || resolvedHotspots.length > 0 || rateChanges.length > 0,
+      newHotspots,
+      resolvedHotspots,
+      rateChanges,
+    };
   }
 
   /**
