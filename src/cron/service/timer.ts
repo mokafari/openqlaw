@@ -52,6 +52,17 @@ export async function runDueJobs(state: CronServiceState) {
     return;
   }
   const now = state.deps.nowMs();
+
+  // Debug: Log when checking for due jobs
+  state.deps.log.debug(
+    {
+      now,
+      jobCount: state.store.jobs.length,
+      enabledCount: state.store.jobs.filter((j) => j.enabled).length,
+    },
+    "cron: checking for due jobs",
+  );
+
   const due = state.store.jobs.filter((j) => {
     if (!j.enabled) {
       return false;
@@ -60,8 +71,25 @@ export async function runDueJobs(state: CronServiceState) {
       return false;
     }
     const next = j.state.nextRunAtMs;
-    return typeof next === "number" && now >= next;
+    const isDue = typeof next === "number" && now >= next;
+
+    // Debug: Log why jobs aren't due
+    if (!isDue && typeof next === "number") {
+      state.deps.log.debug(
+        { job: j.name, next, now, gap: next - now, gapMs: next - now },
+        "cron: job not due yet",
+      );
+    }
+
+    return isDue;
   });
+
+  // Debug: Log how many due jobs found
+  state.deps.log.debug(
+    { dueCount: due.length, dueJobs: due.map((j) => j.name) },
+    "cron: found due jobs",
+  );
+
   for (const job of due) {
     await executeJob(state, job, now, { forced: false });
   }
