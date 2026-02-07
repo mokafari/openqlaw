@@ -90,6 +90,21 @@ export async function runEmbeddedPiAgent(
   return enqueueSession(() =>
     enqueueGlobal(async () => {
       const started = Date.now();
+
+      // Log prediction before run starts (non-blocking)
+      let predictionTaskId: string | undefined;
+      if (params.commandBody && !isProbeSession) {
+        try {
+          const { logRunPrediction } = await import("../evolution/prediction-hooks.js");
+          predictionTaskId = await logRunPrediction({
+            sessionId: params.sessionId,
+            message: params.commandBody,
+          });
+        } catch {
+          // Prediction logging not available or failed - ignore
+        }
+      }
+
       const resolvedWorkspace = resolveUserPath(params.workspaceDir);
       const prevCwd = process.cwd();
 
@@ -689,6 +704,23 @@ export async function runEmbeddedPiAgent(
             });
           } catch {
             // Evolution module not available or failed to load - ignore
+          }
+
+          // Log prediction outcome (non-blocking)
+          if (predictionTaskId) {
+            try {
+              const { logRunOutcome } = await import("../evolution/prediction-hooks.js");
+              await logRunOutcome({
+                sessionId: params.sessionId,
+                success: !aborted && !attempt.promptError,
+                durationMs: Date.now() - started,
+                error: attempt.promptError ? String(attempt.promptError) : undefined,
+              }).catch((err) => {
+                log.debug(`prediction outcome logging failed: ${String(err)}`);
+              });
+            } catch {
+              // Prediction logging not available - ignore
+            }
           }
 
           return {

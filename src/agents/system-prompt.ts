@@ -727,6 +727,7 @@ export async function buildAgentSystemPrompt(params: {
         "evolution_run_dojo_test",
         "evolution_list_patches",
         "rebuild_gateway",
+        "meta_learning",
       ].includes(name.toLowerCase()),
     ) ?? false;
 
@@ -781,6 +782,13 @@ export async function buildAgentSystemPrompt(params: {
       "- Successful patches improve system performance over time",
       "- Recovery attempts are logged for learning and refinement",
       "- Build failures are automatically detected and recovery is attempted",
+      "",
+      "**Meta-Learning Capabilities:**",
+      "- Use meta_learning tool to log predictions before tasks and outcomes after completion",
+      "- Track calibration metrics to improve prediction accuracy over time",
+      "- Access learning journal entries to review what worked and what failed",
+      "- Analyze patterns across sessions to identify recurring issues and successful strategies",
+      "- Knowledge synthesis automatically extracts insights from telemetry and journal entries",
       "",
       "**Safety:**",
       "- Self-modification is gated by policy guardrails",

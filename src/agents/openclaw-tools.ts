@@ -3,6 +3,7 @@ import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { resolvePluginTools } from "../plugins/tools.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
+import { createMetaLearningTool } from "./evolution/meta-learning-tool.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
 import { createBrowserTool } from "./tools/browser-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
@@ -200,6 +201,7 @@ export function createOpenClawTools(options?: {
       createEvolutionListPatchesTool({
         sessionKey: options?.agentSessionKey,
       }),
+      createMetaLearningTool(),
     );
   }
 
