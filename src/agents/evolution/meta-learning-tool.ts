@@ -46,7 +46,9 @@ export function createMetaLearningTool(): AnyAgentTool {
 
       try {
         if (action === "log_prediction") {
-          const taskId = randomUUID();
+          console.log("[meta-learning-tool] log_prediction params:", JSON.stringify(params));
+          const taskId = params.taskId ?? randomUUID();
+          console.log("[meta-learning-tool] using taskId:", taskId);
           const prediction: Prediction = {
             taskId,
             taskType: params.taskType ?? "unknown",

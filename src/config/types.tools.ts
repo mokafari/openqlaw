@@ -499,5 +499,18 @@ export type ToolsConfig = {
       /** Log file changes (default: true). */
       logChanges?: boolean;
     };
+    /** Tensor intuition layer — System 1 fast-path pattern recall. */
+    tensor?: {
+      /** Enable tensor pattern store and recall (default: false). */
+      enabled?: boolean;
+      /** Confidence threshold for System 1 bypass (default: 0.85). */
+      bypassThreshold?: number;
+      /** Maximum number of stored patterns (default: 10000). */
+      maxPatterns?: number;
+      /** Days before unused patterns are pruned (default: 90). */
+      patternTtlDays?: number;
+      /** Minimum fitness score for pattern recall (default: 0.7). */
+      minFitnessForRecall?: number;
+    };
   };
 };

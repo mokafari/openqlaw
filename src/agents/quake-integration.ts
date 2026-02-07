@@ -29,6 +29,10 @@ export type QuakeIntegrationContext = {
   goalStack: GoalStack;
   soul: SoulPersonality | null;
   synonymDictionary: SynonymDictionary;
+  /** Tensor intuition layer (initialised when tensor config is enabled). */
+  patternStore?: import("./tensor/pattern-store.js").PatternStore;
+  tensorRouter?: import("./tensor/router.js").TensorRouter;
+  loopController?: import("./tensor/loop-controller.js").NeuroSymbolicLoopController;
 };
 
 /**
@@ -90,6 +94,55 @@ export async function initializeQuakeIntegration(params: {
     globalCampingManager.restoreCamping(campingState);
   }
 
+  // Initialize tensor intuition layer if enabled
+  let patternStore: import("./tensor/pattern-store.js").PatternStore | undefined;
+  let tensorRouter: import("./tensor/router.js").TensorRouter | undefined;
+  let loopController: import("./tensor/loop-controller.js").NeuroSymbolicLoopController | undefined;
+  try {
+    const cfg = loadConfig();
+    const tensorCfg = cfg.tools?.evolution?.tensor;
+    if (tensorCfg?.enabled) {
+      const { PatternStore: PatternStoreCls } = await import("./tensor/pattern-store.js");
+      const { DEFAULT_TENSOR_CONFIG } = await import("./tensor/types.js");
+      const { TensorRouter } = await import("./tensor/router.js");
+      const { NeuroSymbolicLoopController } = await import("./tensor/loop-controller.js");
+      const { createEmbeddingProvider } = await import("../memory/embeddings.js");
+
+      const agentDir = params.sessionDir;
+      const dbPath = (await import("node:path")).join(agentDir, "tensor", "patterns.db");
+      const resolvedCfg = { ...DEFAULT_TENSOR_CONFIG, ...tensorCfg };
+
+      patternStore = new PatternStoreCls(dbPath, resolvedCfg);
+      await patternStore.initVec().catch(() => {
+        // sqlite-vec optional — brute-force cosine fallback
+      });
+
+      const embResult = await createEmbeddingProvider({
+        config: cfg,
+        agentDir,
+        provider: "auto",
+        model: "text-embedding-3-small",
+        fallback: "local",
+      });
+
+      tensorRouter = new TensorRouter({
+        store: patternStore,
+        embeddingProvider: embResult.provider,
+        config: resolvedCfg,
+      });
+
+      loopController = new NeuroSymbolicLoopController({
+        fsmManager,
+        goalStack,
+        patternStore,
+        embeddingProvider: embResult.provider,
+        config: resolvedCfg,
+      });
+    }
+  } catch {
+    // Tensor init is non-fatal
+  }
+
   return {
     sessionId,
     sessionDir,
@@ -98,6 +151,9 @@ export async function initializeQuakeIntegration(params: {
     goalStack,
     soul,
     synonymDictionary,
+    patternStore,
+    tensorRouter,
+    loopController,
   };
 }
 

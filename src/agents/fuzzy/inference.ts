@@ -10,6 +10,7 @@ import {
   TASK_COMPLEXITY,
   URGENCY,
   CONFIDENCE,
+  PATTERN_CONFIDENCE,
   getMembershipValue,
 } from "./variables.js";
 
@@ -18,6 +19,7 @@ export type CognitiveEconomyDecision = {
   thinkingLevel: ThinkLevel;
   toolDepth: "full" | "summary" | "minimal";
   shouldDefer: boolean; // Defer to camping/cron
+  usePatternBypass: boolean; // Tensor System 1 bypass recommended
 };
 
 export type CognitiveEconomyInputs = {
@@ -26,6 +28,7 @@ export type CognitiveEconomyInputs = {
   urgency: number; // 0-1 (how urgent is this task)
   previousAttempts: number; // Number of previous attempts
   confidence?: number; // 0-1 (confidence in current approach)
+  patternRecallConfidence?: number; // 0-1 (tensor pattern recall confidence)
 };
 
 /**
@@ -67,7 +70,14 @@ export function estimateTaskComplexity(message: string, toolCount: number): numb
 export function decideCognitiveAllocation(
   inputs: CognitiveEconomyInputs,
 ): CognitiveEconomyDecision {
-  const { contextRemaining, taskComplexity, urgency, previousAttempts, confidence = 0.5 } = inputs;
+  const {
+    contextRemaining,
+    taskComplexity,
+    urgency,
+    previousAttempts,
+    confidence = 0.5,
+    patternRecallConfidence,
+  } = inputs;
 
   // Calculate membership values
   const ctxLow = getMembershipValue(CONTEXT_REMAINING, contextRemaining, "low");
@@ -161,10 +171,27 @@ export function decideCognitiveAllocation(
   // Determine if should defer
   const shouldDefer = contextRemaining < 0.1 && urgency < 0.3 && previousAttempts === 0;
 
+  // Tensor pattern bypass rules
+  let usePatternBypass = false;
+  if (patternRecallConfidence !== undefined) {
+    const patHigh = getMembershipValue(PATTERN_CONFIDENCE, patternRecallConfidence, "high");
+    const patMed = getMembershipValue(PATTERN_CONFIDENCE, patternRecallConfidence, "medium");
+
+    // Rule T1: high pattern confidence + simple task -> bypass
+    const ruleT1 = Math.min(patHigh, taskSimple);
+    // Rule T2: high pattern confidence + moderate task + high urgency -> bypass
+    const ruleT2 = Math.min(patHigh, taskModerate, urgHigh);
+    // Rule T3: medium pattern confidence + simple task + low context -> bypass
+    const ruleT3 = Math.min(patMed, taskSimple, ctxLow);
+
+    usePatternBypass = Math.max(ruleT1, ruleT2, ruleT3) > 0.5;
+  }
+
   return {
     model: selectedModel,
     thinkingLevel,
     toolDepth,
     shouldDefer,
+    usePatternBypass,
   };
 }

@@ -104,6 +104,28 @@ export const CONFIDENCE: FuzzyVariable = {
   ],
 };
 
+export const PATTERN_CONFIDENCE: FuzzyVariable = {
+  name: "PATTERN_CONFIDENCE",
+  range: [0, 1],
+  membershipFunctions: [
+    {
+      name: "low",
+      type: "trapezoidal",
+      params: [0, 0, 0.3, 0.5],
+    },
+    {
+      name: "medium",
+      type: "triangular",
+      params: [0.4, 0.6, 0.8],
+    },
+    {
+      name: "high",
+      type: "trapezoidal",
+      params: [0.7, 0.85, 1, 1],
+    },
+  ],
+};
+
 export function getMembershipValue(
   variable: FuzzyVariable,
   value: number,

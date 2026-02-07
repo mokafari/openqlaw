@@ -858,9 +858,31 @@ export async function runEmbeddedAttempt(
             });
           }
 
-          // Only pass images option if there are actually images to pass
-          // This avoids potential issues with models that don't expect the images parameter
-          if (imageResult.images.length > 0) {
+          // Tensor router: check for System 1 bypass before LLM call
+          let tensorBypassed = false;
+          if (quakeContext?.tensorRouter) {
+            try {
+              const tensorDecision = await quakeContext.tensorRouter.route({
+                prompt: effectivePrompt,
+                fsmState: quakeContext.fsmManager.getState(),
+                forceSystem2: params.thinkLevel === "high",
+              });
+              if (tensorDecision.route === "system1" && tensorDecision.pattern) {
+                log.debug(`Tensor System 1 bypass: pattern=${tensorDecision.pattern.id}`);
+                quakeContext.patternStore?.touchPattern(tensorDecision.pattern.id);
+                tensorBypassed = true;
+              }
+            } catch (err) {
+              log.debug(`Tensor routing failed (non-fatal): ${err}`);
+            }
+          }
+
+          if (tensorBypassed) {
+            // System 1 bypass — skip LLM call (pattern already replayed)
+            log.debug("Tensor: skipped LLM call via System 1 bypass");
+          } else if (imageResult.images.length > 0) {
+            // Only pass images option if there are actually images to pass
+            // This avoids potential issues with models that don't expect the images parameter
             await abortable(activeSession.prompt(effectivePrompt, { images: imageResult.images }));
           } else {
             await abortable(activeSession.prompt(effectivePrompt));
@@ -926,6 +948,29 @@ export async function runEmbeddedAttempt(
           await persistQuakeIntegration(quakeContext).catch((err) => {
             log.warn(`Quake integration persist failed (non-fatal): ${err}`);
           });
+
+          // Record action pattern for tensor recall (non-fatal, fire-and-forget)
+          if (quakeContext.loopController && quakeContext.patternStore) {
+            const runSuccess = !aborted && !promptError;
+            const normalizedMetas = toolMetas
+              .filter(
+                (t): t is { toolName: string; meta?: string } => typeof t.toolName === "string",
+              )
+              .map((t) => ({ toolName: t.toolName, meta: t.meta }));
+            quakeContext.loopController
+              .onLearn({
+                prompt: params.prompt,
+                toolMetas: normalizedMetas,
+                success: runSuccess,
+                durationMs: 0, // exact duration not available here
+                tokenUsage: { input: 0, output: 0, total: 0 },
+                toolCallCount: normalizedMetas.length,
+                fsmState: quakeContext.fsmManager.getState(),
+              })
+              .catch((err) => {
+                log.debug(`Tensor pattern recording failed (non-fatal): ${err}`);
+              });
+          }
         }
         params.abortSignal?.removeEventListener?.("abort", onAbort);
       }

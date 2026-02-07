@@ -121,6 +121,18 @@ export function createGatewayTool(opts?: {
             // ignore: best-effort
           }
         }
+        // Log restart prediction for meta-learning
+        let restartTaskId: string | undefined;
+        try {
+          if (opts?.config?.tools?.evolution?.selfModification?.enabled) {
+            const { RestartDetection } = await import("../../evolution/restart-detection.js");
+            const detection = new RestartDetection();
+            restartTaskId = await detection.logRestartPrediction(reason ?? note ?? undefined);
+          }
+        } catch {
+          // Non-critical, continue with restart
+        }
+
         const payload: RestartSentinelPayload = {
           kind: "restart",
           status: "ok",

@@ -590,6 +590,16 @@ export const ToolsSchema = z
           })
           .strict()
           .optional(),
+        tensor: z
+          .object({
+            enabled: z.boolean().optional(),
+            bypassThreshold: z.number().min(0).max(1).optional(),
+            maxPatterns: z.number().int().positive().optional(),
+            patternTtlDays: z.number().int().positive().optional(),
+            minFitnessForRecall: z.number().min(0).max(1).optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

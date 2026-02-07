@@ -156,5 +156,19 @@ export async function startGatewaySidecars(params: {
     }, 750);
   }
 
+  // Detect and log gateway restarts for meta-learning
+  if (params.cfg.tools?.evolution?.selfModification?.enabled) {
+    setTimeout(async () => {
+      try {
+        const { RestartDetection } = await import("../agents/evolution/restart-detection.js");
+        const detection = new RestartDetection();
+        await detection.detectAndLogRestart();
+      } catch (err) {
+        // Non-critical, log and continue
+        params.logHooks.warn(`restart detection failed: ${String(err)}`);
+      }
+    }, 1000);
+  }
+
   return { browserControl, pluginServices };
 }

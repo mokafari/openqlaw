@@ -83,10 +83,15 @@ export class MetaLearningSystem {
    * Calculate calibration metrics for a task type.
    */
   async getCalibrationMetrics(taskType: string): Promise<CalibrationMetrics | null> {
+    console.log(`[meta-learning] getCalibrationMetrics called with taskType=${taskType}`);
     const predictions = await this.loadPredictions(taskType);
     const outcomes = await this.loadOutcomes(taskType);
+    console.log(
+      `[meta-learning] loaded ${predictions.length} predictions, ${outcomes.length} outcomes`,
+    );
 
     if (predictions.length === 0 || outcomes.length === 0) {
+      console.log(`[meta-learning] early return: no predictions or outcomes`);
       return null;
     }
 
@@ -101,7 +106,9 @@ export class MetaLearningSystem {
       }
     }
 
+    console.log(`[meta-learning] matched ${matched.length} predictions to outcomes`);
     if (matched.length === 0) {
+      console.log(`[meta-learning] no matches found, returning null`);
       return null;
     }
 
@@ -236,7 +243,8 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
       for (const line of lines) {
         try {
           const pred = JSON.parse(line) as Prediction;
-          if (!taskType || pred.taskType === taskType) {
+          // "all" or undefined means no filter
+          if (!taskType || taskType === "all" || pred.taskType === taskType) {
             predictions.push(pred);
           }
         } catch {
