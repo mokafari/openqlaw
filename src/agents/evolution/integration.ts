@@ -1,12 +1,17 @@
+import type { Goal } from "../goals/types.js";
 import type { EmbeddedPiRunMeta, EmbeddedPiAgentMeta } from "../pi-embedded-runner/types.js";
 import type { ToolErrorInfo } from "./telemetry.js";
 import { logDebug } from "../../logger.js";
+import { deriveSatisfactionScore, type SatisfactionSignals } from "./auto-satisfaction.js";
 import { loadGenotype, applyGenotypeToSystemPrompt } from "./genotype.js";
 import { logSessionStats } from "./telemetry.js";
 
 /**
  * Log telemetry after an agent run completes.
  * This should be called from the agent runner after collecting all run metadata.
+ *
+ * Auto-Satisfaction: If no explicit userSatisfaction is provided, it will be
+ * automatically derived from observable signals (goals, execution quality, patterns).
  */
 export async function logAgentRunTelemetry(params: {
   sessionId: string;
@@ -16,6 +21,12 @@ export async function logAgentRunTelemetry(params: {
   toolMetas: Array<{ toolName: string; meta?: string }>;
   toolErrors?: Array<{ toolName: string; error: string; timestamp: number }>;
   statsDir?: string;
+  /** Optional: Provide initial/final goals for satisfaction derivation */
+  goals?: { initial: Goal[]; final: Goal[] };
+  /** Optional: Explicit user satisfaction (0.0-1.0). If not provided, auto-derived. */
+  userSatisfaction?: number;
+  /** Optional: Context text for pattern similarity search */
+  contextText?: string;
 }): Promise<void> {
   try {
     // Load current genotype if available
@@ -44,6 +55,37 @@ export async function logAgentRunTelemetry(params: {
       }
     }
 
+    // Derive user satisfaction if not explicitly provided
+    let userSatisfaction = params.userSatisfaction;
+    if (userSatisfaction === undefined) {
+      const usage = params.agentMeta?.usage;
+      const signals: SatisfactionSignals = {
+        goals: params.goals,
+        execution: {
+          success: !params.meta.aborted && !params.meta.error,
+          aborted: params.meta.aborted ?? false,
+          errorCount: params.toolErrors?.length ?? 0,
+          durationMs: params.meta.durationMs,
+          tokenUsage: {
+            input: usage?.input ?? 0,
+            output: usage?.output ?? 0,
+            total: usage?.total ?? 0,
+          },
+          toolCalls: params.toolMetas.length,
+          toolErrors: Object.keys(toolErrors).length > 0 ? toolErrors : undefined,
+        },
+        contextText: params.contextText,
+        // TODO: Fetch similar patterns from tensor store for pattern score
+        // This would require passing PatternStore + EmbeddingProvider to this function
+        // For now, pattern score will be neutral (0.5)
+      };
+
+      userSatisfaction = deriveSatisfactionScore(signals);
+      logDebug(
+        `[evolution] Auto-derived satisfaction: ${userSatisfaction.toFixed(3)} (goals=${signals.goals ? "yes" : "no"}, success=${signals.execution.success})`,
+      );
+    }
+
     await logSessionStats({
       sessionId: params.sessionId,
       sessionKey: params.sessionKey,
@@ -54,6 +96,7 @@ export async function logAgentRunTelemetry(params: {
       genotypeId: genotype.genotypeId,
       statsDir: params.statsDir,
       toolErrors: Object.keys(toolErrors).length > 0 ? toolErrors : undefined,
+      userSatisfaction,
     });
   } catch (err) {
     // Don't fail agent runs if telemetry fails
