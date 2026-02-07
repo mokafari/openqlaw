@@ -165,4 +165,15 @@ export function registerEvolutionCommand(program: Command) {
         focusAreas: opts.focus,
       });
     });
+
+  evolution
+    .command("cleanup")
+    .description("Clean up obsolete patches and fix missing error messages")
+    .option("--dry-run", "Show what would be cleaned without making changes")
+    .action(async (opts) => {
+      await cmdEvolution({
+        action: "cleanup",
+        dryRun: opts.dryRun ?? false,
+      });
+    });
 }

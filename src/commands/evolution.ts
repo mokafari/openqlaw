@@ -18,13 +18,15 @@ export async function cmdEvolution(args: {
     | "monitor"
     | "mutate"
     | "daemon"
-    | "improve";
+    | "improve"
+    | "cleanup";
   genotypeId?: string;
   generation?: number;
   monitorAction?: "start" | "stop" | "check" | "status";
   daemonAction?: "start" | "stop" | "status";
   autoMutate?: boolean;
   focusAreas?: string[];
+  dryRun?: boolean;
 }): Promise<void> {
   const deps = createDefaultDeps();
   const cfg = loadConfig();
@@ -427,6 +429,65 @@ export async function cmdEvolution(args: {
         }
       } else {
         console.log("\nℹ️  No improvement opportunities identified");
+      }
+      break;
+    }
+
+    case "cleanup": {
+      console.log("Cleaning up evolution patches...");
+
+      // Fix failed patch errors first
+      console.log("\n1. Fixing failed patch error messages...");
+      const errorFixResult = await fixFailedPatchErrors();
+      console.log(`   Fixed: ${errorFixResult.fixed} patches`);
+      if (errorFixResult.errors.length > 0) {
+        console.log(`   Errors: ${errorFixResult.errors.length}`);
+        for (const err of errorFixResult.errors) {
+          console.log(`     - ${err}`);
+        }
+      }
+
+      // Clean up obsolete pending patches
+      console.log("\n2. Cleaning up obsolete pending patches...");
+      const cleanupResult = await cleanupObsoletePatches({
+        dryRun: args.dryRun ?? false,
+      });
+
+      if (args.dryRun) {
+        console.log(`   Would clean: ${cleanupResult.cleaned} patches`);
+        console.log(`   Would keep: ${cleanupResult.kept} patches`);
+      } else {
+        console.log(`   Cleaned: ${cleanupResult.cleaned} patches`);
+        console.log(`   Kept: ${cleanupResult.kept} patches`);
+      }
+
+      if (cleanupResult.errors.length > 0) {
+        console.log(`   Errors: ${cleanupResult.errors.length}`);
+        for (const err of cleanupResult.errors) {
+          console.log(`     - ${err}`);
+        }
+      }
+
+      // Show summary
+      console.log("\n3. Patch Summary:");
+      const allPatches = await listPatches();
+      const byStatus = {
+        pending: allPatches.filter((p) => p.status === "pending").length,
+        applied: allPatches.filter((p) => p.status === "applied").length,
+        failed: allPatches.filter((p) => p.status === "failed").length,
+        reverted: allPatches.filter((p) => p.status === "reverted").length,
+      };
+      console.log(`   Pending: ${byStatus.pending}`);
+      console.log(`   Applied: ${byStatus.applied}`);
+      console.log(`   Failed: ${byStatus.failed}`);
+      console.log(`   Reverted: ${byStatus.reverted}`);
+
+      if (args.dryRun) {
+        console.log(
+          "\n⚠️  Dry run mode - no changes made. Run without --dry-run to apply changes.",
+        );
+      } else {
+        console.log("\n✅ Cleanup complete!");
       }
       break;
     }

@@ -26,6 +26,7 @@ import {
   type SessionScope,
   updateSessionStore,
 } from "../../config/sessions.js";
+import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
 import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
@@ -340,6 +341,19 @@ export async function initSessionState(params: {
     // Preserve per-session overrides while resetting compaction state on /new.
     store[sessionKey] = { ...store[sessionKey], ...sessionEntry };
   });
+
+  // Trigger internal hooks for command:new and command:reset
+  if (resetTriggered) {
+    const hookAction =
+      trimmedBodyLower === "/new" || strippedForResetLower === "/new" ? "new" : "reset";
+    const hookEvent = createInternalHookEvent("command", hookAction, sessionKey, {
+      cfg,
+      sessionEntry,
+      previousSessionEntry,
+      commandSource: ctx.Provider || ctx.Surface || "unknown",
+    });
+    void triggerInternalHook(hookEvent);
+  }
 
   const sessionCtx: TemplateContext = {
     ...ctx,
