@@ -197,6 +197,12 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     }
   }
 
+  // Track recently seen message IDs to filter duplicate entries from imsg CLI
+  // (imsg sometimes returns the same message with is_from_me: true and is_from_me: false)
+  const seenMessageIds = new Set<number>();
+  const MESSAGE_ID_TTL_MS = 60000; // 1 minute
+  const seenMessageTimestamps = new Map<number, number>();
+
   const inboundDebounceMs = resolveInboundDebounceMs({ cfg, channel: "imessage" });
   const inboundDebouncer = createInboundDebouncer<{ message: IMessagePayload }>({
     debounceMs: inboundDebounceMs,
@@ -255,6 +261,25 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     const senderNormalized = normalizeIMessageHandle(sender);
     if (message.is_from_me) {
       return;
+    }
+
+    // Deduplicate by message ID (imsg CLI bug: same message appears twice with different is_from_me values)
+    const messageId = message.id;
+    if (messageId != null) {
+      if (seenMessageIds.has(messageId)) {
+        return; // Already processed this message
+      }
+      seenMessageIds.add(messageId);
+      seenMessageTimestamps.set(messageId, Date.now());
+
+      // Cleanup old entries
+      const now = Date.now();
+      for (const [id, timestamp] of seenMessageTimestamps.entries()) {
+        if (now - timestamp > MESSAGE_ID_TTL_MS) {
+          seenMessageIds.delete(id);
+          seenMessageTimestamps.delete(id);
+        }
+      }
     }
 
     const chatId = message.chat_id ?? undefined;
