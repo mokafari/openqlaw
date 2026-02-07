@@ -4,7 +4,13 @@ import { isTruthyEnvValue } from "./env.js";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BUFFER_BYTES = 2 * 1024 * 1024;
 let lastAppliedKeys: string[] = [];
+// Cache states:
+// - undefined: not yet attempted
+// - null: detection failed (will retry after backoff)
+// - string: detected path (success, cached permanently)
+let shellPathFailedAt: number | null = null;
 let cachedShellPath: string | null | undefined;
+const SHELL_PATH_RETRY_BACKOFF_MS = 30_000; // Retry failed detection after 30s
 
 function resolveShell(env: NodeJS.ProcessEnv): string {
   const shell = env.SHELL?.trim();
@@ -131,6 +137,16 @@ export function getShellPathFromLoginShell(opts: {
   if (cachedShellPath !== undefined) {
     return cachedShellPath;
   }
+  // If we previously failed, check if enough time has passed to retry
+  if (shellPathFailedAt !== null) {
+    const elapsed = Date.now() - shellPathFailedAt;
+    if (elapsed < SHELL_PATH_RETRY_BACKOFF_MS) {
+      // Still in backoff period, return null without retrying
+      return null;
+    }
+    // Backoff expired, clear failure state and retry
+    shellPathFailedAt = null;
+  }
   if (process.platform === "win32") {
     cachedShellPath = null;
     return cachedShellPath;
@@ -153,8 +169,9 @@ export function getShellPathFromLoginShell(opts: {
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch {
-    cachedShellPath = null;
-    return cachedShellPath;
+    // Don't cache failure permanently - allow retry after backoff
+    shellPathFailedAt = Date.now();
+    return null;
   }
 
   const shellEnv = parseShellEnv(stdout);
@@ -165,6 +182,7 @@ export function getShellPathFromLoginShell(opts: {
 
 export function resetShellPathCacheForTests(): void {
   cachedShellPath = undefined;
+  shellPathFailedAt = null;
 }
 
 export function getShellEnvAppliedKeys(): string[] {
