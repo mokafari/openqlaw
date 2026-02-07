@@ -181,6 +181,41 @@ export class MutationWorkflow {
   private async verifyBuild(): Promise<{ success: boolean; error?: string }> {
     try {
       log.info("[mutation] Verifying build...");
+
+      // Use BuildFailureHook if available for automatic recovery
+      try {
+        const { getGlobalBuildFailureHook } = await import("./build-failure-hook.js");
+        const hook = getGlobalBuildFailureHook({
+          workspaceDir: this.workspaceDir,
+          enabled: true,
+          autoRecover: true,
+        });
+
+        const result = await hook.wrapBuild(async () => {
+          try {
+            const output = execSync("pnpm build", {
+              cwd: this.workspaceDir,
+              encoding: "utf-8",
+              stdio: "pipe",
+              timeout: 120_000, // 2 minute timeout
+            });
+            return { exitCode: 0, output: output.toString() };
+          } catch (err: unknown) {
+            const error = err as { stdout?: string; stderr?: string; status?: number | null };
+            const output = (error.stdout ?? "") + (error.stderr ?? "");
+            return { exitCode: error.status ?? 1, output };
+          }
+        });
+
+        if (result.recovered) {
+          log.info("[mutation] Build recovered automatically after failure");
+        }
+        return { success: result.exitCode === 0 };
+      } catch {
+        // BuildFailureHook not available, fall back to direct build
+      }
+
+      // Fallback: direct build
       execSync("pnpm build", {
         cwd: this.workspaceDir,
         stdio: "pipe",

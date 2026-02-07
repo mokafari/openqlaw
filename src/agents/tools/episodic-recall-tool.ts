@@ -67,9 +67,9 @@ export function createEpisodicRecallTool(options: {
         const embResult = await createEmbeddingProvider({
           config: cfg,
           agentDir: options.agentDir,
-          provider: "auto",
-          model: "text-embedding-3-small",
-          fallback: "local",
+          provider: "local",
+          model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf",
+          fallback: "none",
         });
 
         // Resolve current goals from session store (FSM state not available at tool time)

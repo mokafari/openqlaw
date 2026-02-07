@@ -118,4 +118,51 @@ export function registerEvolutionCommand(program: Command) {
         monitorAction: "status",
       });
     });
+
+  const daemon = evolution
+    .command("daemon")
+    .description("Manage evolution daemon (continuous background evolution)");
+
+  daemon
+    .command("start")
+    .description("Start evolution daemon (continuous background evolution)")
+    .option("--no-auto-mutate", "Disable automatic mutation cycles")
+    .action(async (opts) => {
+      await cmdEvolution({
+        action: "daemon",
+        daemonAction: "start",
+        autoMutate: opts.autoMutate !== false,
+      });
+    });
+
+  daemon
+    .command("stop")
+    .description("Stop evolution daemon")
+    .action(async () => {
+      await cmdEvolution({
+        action: "daemon",
+        daemonAction: "stop",
+      });
+    });
+
+  daemon
+    .command("status")
+    .description("Show evolution daemon status")
+    .action(async () => {
+      await cmdEvolution({
+        action: "daemon",
+        daemonAction: "status",
+      });
+    });
+
+  evolution
+    .command("improve")
+    .description("Run recursive improvement cycle (spawn sub-agents for self-improvement)")
+    .option("--focus <areas>", "Comma-separated focus areas (e.g., 'fitness,error-rate')")
+    .action(async (opts) => {
+      await cmdEvolution({
+        action: "improve",
+        focusAreas: opts.focus,
+      });
+    });
 }

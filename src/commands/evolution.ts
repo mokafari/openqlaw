@@ -1,17 +1,30 @@
 import { Breeder } from "../agents/evolution/breeder.js";
 import { runDojoSuite, DOJO_TASKS } from "../agents/evolution/dojo.js";
+import { getGlobalEvolutionDaemon } from "../agents/evolution/evolution-daemon.js";
 import { loadGenotype, saveGenotype } from "../agents/evolution/genotype.js";
+import { getGlobalRecursiveImprover } from "../agents/evolution/recursive-improver.js";
 import { getGlobalTelemetryMonitor } from "../agents/evolution/telemetry-monitor.js";
 import { getAggregatedStats, readSessionStats } from "../agents/evolution/telemetry.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import { loadConfig } from "../config/config.js";
 
 export async function cmdEvolution(args: {
-  action: "status" | "evolve" | "dojo" | "history" | "stats" | "monitor" | "mutate";
+  action:
+    | "status"
+    | "evolve"
+    | "dojo"
+    | "history"
+    | "stats"
+    | "monitor"
+    | "mutate"
+    | "daemon"
+    | "improve";
   genotypeId?: string;
   generation?: number;
   monitorAction?: "start" | "stop" | "check" | "status";
+  daemonAction?: "start" | "stop" | "status";
   autoMutate?: boolean;
+  focusAreas?: string[];
 }): Promise<void> {
   const deps = createDefaultDeps();
   const cfg = loadConfig();
@@ -290,6 +303,130 @@ export async function cmdEvolution(args: {
         console.log("\nℹ️  No hotspots detected - no mutations needed");
       } else {
         console.log("\n⚠️  No mutations were successful");
+      }
+      break;
+    }
+
+    case "daemon": {
+      const daemon = getGlobalEvolutionDaemon({
+        checkIntervalMs: 3600000, // 1 hour
+        autoMutate: args.autoMutate ?? true,
+      });
+
+      const action = args.daemonAction ?? "status";
+
+      switch (action) {
+        case "start": {
+          daemon.start();
+          console.log("Evolution daemon started");
+          console.log("  - Checking every hour");
+          console.log("  - Fitness degradation threshold: 10%");
+          console.log("  - Error rate threshold: 20%");
+          console.log(`  - Auto-mutation: ${args.autoMutate !== false ? "enabled" : "disabled"}`);
+          console.log("\nThe daemon will:");
+          console.log("  - Trigger evolution when fitness degrades");
+          console.log("  - Trigger mutations when error rates are high");
+          console.log("  - Run continuously in the background");
+          break;
+        }
+
+        case "stop": {
+          daemon.stop();
+          console.log("Evolution daemon stopped");
+          break;
+        }
+
+        case "status": {
+          const status = daemon.getStatus();
+          console.log("Evolution Daemon Status:");
+          console.log(`  Running: ${status.running ? "✓ Yes" : "✗ No"}`);
+          if (status.lastCheckTime > 0) {
+            const age = Date.now() - status.lastCheckTime;
+            console.log(
+              `  Last Check: ${age < 60000 ? `${Math.round(age / 1000)}s ago` : `${Math.round(age / 60000)}m ago`}`,
+            );
+          } else {
+            console.log(`  Last Check: Never`);
+          }
+          if (status.lastEvolutionTime) {
+            const age = Date.now() - status.lastEvolutionTime;
+            console.log(
+              `  Last Evolution: ${age < 3600000 ? `${Math.round(age / 60000)}m ago` : `${Math.round(age / 3600000)}h ago`}`,
+            );
+          }
+          if (status.lastMutationTime) {
+            const age = Date.now() - status.lastMutationTime;
+            console.log(
+              `  Last Mutation: ${age < 3600000 ? `${Math.round(age / 60000)}m ago` : `${Math.round(age / 3600000)}h ago`}`,
+            );
+          }
+          console.log(`  Evolution Cycles: ${status.evolutionCount}`);
+          console.log(`  Mutation Cycles: ${status.mutationCount}`);
+          if (status.currentFitness !== undefined) {
+            console.log(`  Current Fitness: ${status.currentFitness.toFixed(3)}`);
+          }
+          if (status.baselineFitness !== undefined) {
+            console.log(`  Baseline Fitness: ${status.baselineFitness.toFixed(3)}`);
+            if (status.currentFitness !== undefined) {
+              const change = status.currentFitness - status.baselineFitness;
+              const changePercent = (change / status.baselineFitness) * 100;
+              const symbol = change >= 0 ? "↑" : "↓";
+              console.log(
+                `  Fitness Change: ${symbol} ${Math.abs(changePercent).toFixed(1)}% (${change >= 0 ? "improved" : "degraded"})`,
+              );
+            }
+          }
+          break;
+        }
+      }
+      break;
+    }
+
+    case "improve": {
+      console.log("Starting recursive improvement cycle...");
+      const improver = getGlobalRecursiveImprover();
+
+      const focusAreas = args.focusAreas
+        ? args.focusAreas.split(",").map((a) => a.trim())
+        : undefined;
+
+      const results = await improver.runImprovementCycle({
+        maxConcurrentTasks: 2,
+        focusAreas,
+      });
+
+      console.log(`\nRecursive Improvement Cycle Complete`);
+      console.log(`  Total Tasks: ${results.length}`);
+      console.log(`  Successful: ${results.filter((r) => r.success).length}`);
+      console.log(`  Failed: ${results.filter((r) => !r.success).length}`);
+
+      if (results.length > 0) {
+        console.log("\nResults:");
+        for (const result of results) {
+          const status = result.success ? "✅" : "❌";
+          console.log(`  ${status} ${result.taskId}`);
+          if (result.improvements.fitnessChange) {
+            console.log(
+              `     Fitness Change: ${result.improvements.fitnessChange >= 0 ? "+" : ""}${result.improvements.fitnessChange.toFixed(3)}`,
+            );
+          }
+          if (result.improvements.errorRateChange) {
+            console.log(
+              `     Error Rate Change: ${result.improvements.errorRateChange >= 0 ? "+" : ""}${(result.improvements.errorRateChange * 100).toFixed(1)}%`,
+            );
+          }
+          if (
+            result.improvements.newCapabilities &&
+            result.improvements.newCapabilities.length > 0
+          ) {
+            console.log(`     New Capabilities: ${result.improvements.newCapabilities.join(", ")}`);
+          }
+          if (result.error) {
+            console.log(`     Error: ${result.error}`);
+          }
+        }
+      } else {
+        console.log("\nℹ️  No improvement opportunities identified");
       }
       break;
     }
