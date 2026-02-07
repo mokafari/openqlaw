@@ -288,7 +288,7 @@ const customRoutes: ErrorRecoveryRoute[] = [];
 export function findRecoveryRoute(error: Error): ErrorRecoveryRoute | null {
   const message = error.message;
   const allRoutes = [...customRoutes, ...DEFAULT_RECOVERY_ROUTES].sort(
-    (a, b) => (a.priority ?? 50) - (b.priority ?? 50)
+    (a, b) => (a.priority ?? 50) - (b.priority ?? 50),
   );
 
   for (const route of allRoutes) {
@@ -311,7 +311,7 @@ export function findRecoveryRoute(error: Error): ErrorRecoveryRoute | null {
 export function findAllRecoveryRoutes(error: Error): ErrorRecoveryRoute[] {
   const message = error.message;
   const allRoutes = [...customRoutes, ...DEFAULT_RECOVERY_ROUTES].sort(
-    (a, b) => (a.priority ?? 50) - (b.priority ?? 50)
+    (a, b) => (a.priority ?? 50) - (b.priority ?? 50),
   );
 
   return allRoutes.filter((route) => {
@@ -326,7 +326,7 @@ export function findAllRecoveryRoutes(error: Error): ErrorRecoveryRoute[] {
  */
 export async function executeRecoveryRoute(
   route: ErrorRecoveryRoute,
-  context: Omit<RecoveryContext, "route">
+  context: Omit<RecoveryContext, "route">,
 ): Promise<RecoveryResult> {
   const startTime = Date.now();
   const fullContext: RecoveryContext = { ...context, route };
@@ -364,7 +364,10 @@ export async function executeRecoveryRoute(
 /**
  * Add a custom recovery route at runtime.
  */
-export function addCustomRoute(pattern: string | RegExp, route: Omit<ErrorRecoveryRoute, "errorPattern">): void {
+export function addCustomRoute(
+  pattern: string | RegExp,
+  route: Omit<ErrorRecoveryRoute, "errorPattern">,
+): void {
   customRoutes.push({
     ...route,
     errorPattern: pattern,
@@ -421,7 +424,9 @@ async function handleFileNotFound(error: Error, context: RecoveryContext): Promi
 
   try {
     // Extract path from error message
-    const match = error.message.match(/ENOENT.*'([^']+)'/) || error.message.match(/no such file or directory.*?([^\s,]+)/i);
+    const match =
+      error.message.match(/ENOENT.*'([^']+)'/) ||
+      error.message.match(/no such file or directory.*?([^\s,]+)/i);
     const missingPath = match?.[1];
 
     if (missingPath) {
@@ -468,13 +473,18 @@ async function handleFileNotFound(error: Error, context: RecoveryContext): Promi
   }
 }
 
-async function handlePermissionDenied(error: Error, context: RecoveryContext): Promise<RecoveryResult> {
+async function handlePermissionDenied(
+  error: Error,
+  context: RecoveryContext,
+): Promise<RecoveryResult> {
   const startTime = Date.now();
   const stepsCompleted: string[] = [];
 
   try {
     // Extract path from error message
-    const match = error.message.match(/EACCES.*'([^']+)'/) || error.message.match(/permission denied.*?([^\s,]+)/i);
+    const match =
+      error.message.match(/EACCES.*'([^']+)'/) ||
+      error.message.match(/permission denied.*?([^\s,]+)/i);
     const deniedPath = match?.[1];
 
     if (deniedPath) {
@@ -586,7 +596,10 @@ async function handleTooManyFiles(error: Error, context: RecoveryContext): Promi
   }
 }
 
-async function handleConnectionRefused(error: Error, context: RecoveryContext): Promise<RecoveryResult> {
+async function handleConnectionRefused(
+  error: Error,
+  context: RecoveryContext,
+): Promise<RecoveryResult> {
   const startTime = Date.now();
   const stepsCompleted: string[] = [];
 
@@ -635,7 +648,10 @@ async function handleConnectionRefused(error: Error, context: RecoveryContext): 
   }
 }
 
-async function handleNetworkTimeout(error: Error, context: RecoveryContext): Promise<RecoveryResult> {
+async function handleNetworkTimeout(
+  error: Error,
+  context: RecoveryContext,
+): Promise<RecoveryResult> {
   const startTime = Date.now();
   const stepsCompleted: string[] = [];
 
@@ -672,7 +688,10 @@ async function handleNetworkTimeout(error: Error, context: RecoveryContext): Pro
   }
 }
 
-async function handleTypeScriptError(error: Error, context: RecoveryContext): Promise<RecoveryResult> {
+async function handleTypeScriptError(
+  error: Error,
+  context: RecoveryContext,
+): Promise<RecoveryResult> {
   const startTime = Date.now();
   const stepsCompleted: string[] = [];
 
@@ -716,14 +735,18 @@ async function handleTypeScriptError(error: Error, context: RecoveryContext): Pr
   }
 }
 
-async function handleModuleNotFound(error: Error, context: RecoveryContext): Promise<RecoveryResult> {
+async function handleModuleNotFound(
+  error: Error,
+  context: RecoveryContext,
+): Promise<RecoveryResult> {
   const startTime = Date.now();
   const stepsCompleted: string[] = [];
 
   try {
     // Extract module name
-    const match = error.message.match(/Cannot find module '([^']+)'/) ||
-                  error.message.match(/Module not found.*?['"]([^'"]+)['"]/);
+    const match =
+      error.message.match(/Cannot find module '([^']+)'/) ||
+      error.message.match(/Module not found.*?['"]([^'"]+)['"]/);
     const moduleName = match?.[1];
 
     if (moduleName) {
@@ -788,7 +811,9 @@ async function handleOutOfMemory(error: Error, context: RecoveryContext): Promis
     const currentHeap = heapMatch ? parseInt(heapMatch[1], 10) : 4096;
 
     stepsCompleted.push(`increase_limit: Current heap limit ~${currentHeap}MB`);
-    stepsCompleted.push(`increase_limit: Consider NODE_OPTIONS='--max-old-space-size=${currentHeap * 2}'`);
+    stepsCompleted.push(
+      `increase_limit: Consider NODE_OPTIONS='--max-old-space-size=${currentHeap * 2}'`,
+    );
 
     stepsCompleted.push(`restart: Process restart recommended`);
 
@@ -841,7 +866,9 @@ async function handleGatewayDown(error: Error, context: RecoveryContext): Promis
 
     // Suggest restart via launchctl on macOS
     if (process.platform === "darwin") {
-      stepsCompleted.push(`restart_daemon: Use 'launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway'`);
+      stepsCompleted.push(
+        `restart_daemon: Use 'launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway'`,
+      );
     }
 
     return {

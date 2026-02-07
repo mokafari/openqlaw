@@ -59,7 +59,9 @@ describe("error-recovery-routes", () => {
     });
 
     it("finds out of memory route", () => {
-      const error = new Error("FATAL ERROR: CALL_AND_RETRY_LAST Allocation failed - JavaScript heap out of memory");
+      const error = new Error(
+        "FATAL ERROR: CALL_AND_RETRY_LAST Allocation failed - JavaScript heap out of memory",
+      );
       const route = findRecoveryRoute(error);
 
       expect(route).not.toBeNull();
@@ -308,7 +310,9 @@ describe("error-recovery-routes", () => {
 
   describe("handler integration", () => {
     it("ENOENT handler extracts path from error", async () => {
-      const error = new Error("ENOENT: no such file or directory, open '/path/to/missing/file.txt'");
+      const error = new Error(
+        "ENOENT: no such file or directory, open '/path/to/missing/file.txt'",
+      );
       const route = findRecoveryRoute(error);
 
       expect(route).not.toBeNull();
