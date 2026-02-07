@@ -1,5 +1,7 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { createEditTool, createReadTool, createWriteTool } from "@mariozechner/pi-coding-agent";
+import { readFile } from "fs/promises";
+import { resolve as pathResolve } from "path";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { detectMime } from "../media/mime.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
@@ -225,7 +227,15 @@ export function assertRequiredParams(
 
     if (!satisfied) {
       const label = group.label ?? group.keys.join(" or ");
-      throw new Error(`Missing required parameter: ${label}`);
+      // Show what parameters WERE provided to help debug
+      const providedKeys = Object.keys(record).filter(
+        (k) => record[k] !== undefined && record[k] !== "",
+      );
+      const providedInfo =
+        providedKeys.length > 0
+          ? ` (provided: ${providedKeys.join(", ")})`
+          : " (no parameters provided)";
+      throw new Error(`Missing required parameter: ${label}${providedInfo}`);
     }
   }
 }
@@ -278,9 +288,115 @@ export function createSandboxedWriteTool(root: string) {
   return wrapSandboxPathGuard(wrapToolParamNormalization(base, CLAUDE_PARAM_GROUPS.write), root);
 }
 
+/**
+ * Find a snippet of actual file content around where oldText might be.
+ * Returns helpful context when exact match fails.
+ */
+async function findSimilarTextContext(
+  filePath: string,
+  oldText: string,
+  root: string,
+): Promise<string | null> {
+  try {
+    const absolutePath = pathResolve(root, filePath);
+    const content = await readFile(absolutePath, "utf-8");
+    const lines = content.split("\n");
+
+    // Normalize both for comparison (strip trailing whitespace, lowercase for searching)
+    const normalizedOldText = oldText.trim().toLowerCase();
+    const firstLineOfOldText = normalizedOldText.split("\n")[0].trim();
+
+    // If oldText is very short, don't try fuzzy matching
+    if (firstLineOfOldText.length < 10) {
+      return null;
+    }
+
+    // Find lines that contain significant words from oldText
+    const significantWords = firstLineOfOldText
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 5);
+
+    if (significantWords.length === 0) {
+      return null;
+    }
+
+    // Find best matching line
+    let bestLineIndex = -1;
+    let bestScore = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineLower = lines[i].toLowerCase();
+      let score = 0;
+      for (const word of significantWords) {
+        if (lineLower.includes(word)) {
+          score++;
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestLineIndex = i;
+      }
+    }
+
+    // If we found a decent match (at least 40% of words), show context
+    if (bestScore >= Math.ceil(significantWords.length * 0.4) && bestLineIndex !== -1) {
+      const contextStart = Math.max(0, bestLineIndex - 2);
+      const contextEnd = Math.min(lines.length, bestLineIndex + 5);
+      const contextLines = lines.slice(contextStart, contextEnd);
+
+      // Limit to reasonable length
+      const contextText = contextLines.join("\n").slice(0, 500);
+      return `\n\nActual file content near potential match (lines ${contextStart + 1}-${contextEnd}):\n\`\`\`\n${contextText}\n\`\`\`\n\nTip: Copy the EXACT text from the file, including all whitespace.`;
+    }
+
+    // No good match found - show first few lines of file as reference
+    const previewLines = lines.slice(0, 10);
+    const preview = previewLines.join("\n").slice(0, 400);
+    return `\n\nFile preview (first ${previewLines.length} lines):\n\`\`\`\n${preview}\n\`\`\`\n\nTip: Use 'read' to view the file content first.`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Enhanced edit tool wrapper that provides better error messages when text matching fails.
+ */
+function wrapEditWithDiagnostics(tool: AnyAgentTool, root: string): AnyAgentTool {
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate) => {
+      try {
+        return await tool.execute(toolCallId, params, signal, onUpdate);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        // Enhance "Could not find the exact text" errors with context
+        if (errorMsg.includes("Could not find the exact text")) {
+          const record =
+            params && typeof params === "object" ? (params as Record<string, unknown>) : undefined;
+          const filePath = record?.path ?? record?.file_path;
+          const oldText = record?.oldText ?? record?.old_string;
+
+          if (typeof filePath === "string" && typeof oldText === "string") {
+            const context = await findSimilarTextContext(filePath, oldText, root);
+            if (context) {
+              throw new Error(errorMsg + context);
+            }
+          }
+        }
+
+        throw error;
+      }
+    },
+  };
+}
+
 export function createSandboxedEditTool(root: string) {
   const base = createEditTool(root) as unknown as AnyAgentTool;
-  return wrapSandboxPathGuard(wrapToolParamNormalization(base, CLAUDE_PARAM_GROUPS.edit), root);
+  const normalized = wrapToolParamNormalization(base, CLAUDE_PARAM_GROUPS.edit);
+  const withDiagnostics = wrapEditWithDiagnostics(normalized, root);
+  return wrapSandboxPathGuard(withDiagnostics, root);
 }
 
 export function createOpenClawReadTool(base: AnyAgentTool): AnyAgentTool {
