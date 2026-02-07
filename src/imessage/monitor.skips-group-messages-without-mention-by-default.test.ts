@@ -533,4 +533,64 @@ describe("monitorIMessageProvider", () => {
     expect(String(ctx.Body ?? "")).toContain("[Replying to +15559998888 id:9001]");
     expect(String(ctx.Body ?? "")).toContain("original message");
   });
+
+  it("filters out messages from self (is_from_me=true)", async () => {
+    config = {
+      channels: {
+        imessage: {
+          accounts: ["default"],
+        },
+        defaults: {
+          mentionPatterns: [],
+          groupPolicy: "open",
+        },
+      },
+      identity: {
+        imessage: {
+          allowFrom: ["*"],
+        },
+      },
+    };
+
+    readAllowFromStoreMock.mockResolvedValue([]);
+    requestMock.mockResolvedValue({
+      accounts: [
+        {
+          id: "default",
+          handle: "default",
+          status: 0,
+        },
+      ],
+    });
+
+    const run = monitorIMessageProvider({});
+    await flush();
+
+    requestMock.mockClear();
+    requestMock.mockResolvedValue({});
+
+    await waitForSubscribe();
+
+    // Send a message from self (is_from_me: true) - should be filtered
+    notificationHandler?.({
+      method: "message",
+      params: {
+        message: {
+          id: 99,
+          chat_id: 55,
+          sender: "+15550001111",
+          is_from_me: true, // THIS IS THE KEY - message from agent itself
+          text: "reply sent by agent",
+          is_group: false,
+        },
+      },
+    });
+
+    await flush();
+    closeResolve?.();
+    await run;
+
+    // Should NOT have called reply handler since message is from self
+    expect(replyMock).not.toHaveBeenCalled();
+  });
 });
