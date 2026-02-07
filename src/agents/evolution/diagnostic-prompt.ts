@@ -25,16 +25,26 @@ export function buildDiagnosticAgentPrompt(params: {
   lines.push("");
 
   if (params.sourceFile) {
+    const fullPath = `/Users/gustav/openclaw/${params.sourceFile}`;
     lines.push("");
     lines.push(`### Source File (REQUIRED)`);
     lines.push(`\`\`\``);
-    lines.push(params.sourceFile);
+    lines.push(fullPath);
     lines.push(`\`\`\``);
     lines.push("");
     lines.push(
-      `**IMPORTANT**: Read this source file using the \`read\` tool. Do NOT guess or invent file paths.`,
+      `**CRITICAL**: To read this file, you MUST use the \`read\` tool with the \`file_path\` parameter:`,
     );
-    lines.push(`The file path is relative to the repository root at \`/Users/gustav/openclaw/\`.`);
+    lines.push(`\`\`\`json`);
+    lines.push(`{ "file_path": "${fullPath}" }`);
+    lines.push(`\`\`\``);
+    lines.push("");
+    lines.push(`⚠️ **NEVER call read() without file_path**. The parameter is required. Example:`);
+    lines.push(`\`\`\``);
+    lines.push(`read(file_path: "${fullPath}")`);
+    lines.push(`\`\`\``);
+    lines.push("");
+    lines.push(`Do NOT guess or invent file paths. Use ONLY the path provided above.`);
     lines.push("");
   }
 
@@ -63,9 +73,14 @@ export function buildDiagnosticAgentPrompt(params: {
   lines.push("## Available Tools");
   lines.push("");
   if (params.sourceFile) {
-    lines.push(`- \`read\`: Read the source file: \`${params.sourceFile}\``);
+    const fullPath = `/Users/gustav/openclaw/${params.sourceFile}`;
+    lines.push(
+      `- \`read(file_path: "${fullPath}")\`: Read the source file (ALWAYS include file_path!)`,
+    );
   } else {
-    lines.push("- `read`: Read the source file(s) for the tool");
+    lines.push(
+      '- `read(file_path: "/path/to/file")`: Read source files (ALWAYS include file_path parameter!)',
+    );
   }
   lines.push("- `grep`: Search for related code patterns");
   lines.push("- `sessions_history`: Review session logs for more context");
@@ -73,6 +88,7 @@ export function buildDiagnosticAgentPrompt(params: {
   lines.push("");
   lines.push("## Guidelines");
   lines.push("");
+  lines.push("- **ALWAYS include file_path when calling read()** - never call read() without it");
   lines.push("- Focus on the **root cause**, not just symptoms");
   lines.push("- Consider edge cases and error handling");
   lines.push("- Ensure your fix doesn't break existing functionality");
