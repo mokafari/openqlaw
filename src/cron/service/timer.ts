@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import type { CronJob } from "../types.js";
 import type { CronEvent, CronServiceState } from "./state.js";
@@ -31,6 +32,13 @@ export function armTimer(state: CronServiceState) {
 }
 
 export async function onTimer(state: CronServiceState) {
+  // Direct file write to prove this function is called
+  try {
+    fs.appendFileSync(
+      "/tmp/cron-timer-debug.log",
+      `${new Date().toISOString()} - onTimer called\n`,
+    );
+  } catch {}
   console.error("[CRON-DEBUG]", new Date().toISOString(), "🚨 CRON TIMER FIRED - onTimer called");
   state.deps.log.error({ ts: new Date().toISOString() }, "🚨 CRON TIMER FIRED");
   if (state.running) {
