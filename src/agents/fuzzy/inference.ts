@@ -95,17 +95,17 @@ export function decideCognitiveAllocation(
   const confLow = getMembershipValue(CONFIDENCE, confidence, "low");
   const confHigh = getMembershipValue(CONFIDENCE, confidence, "high");
 
-  // Fuzzy rules for model selection
-  // Rule 1: If context is low AND task is simple -> use flash
-  const rule1 = Math.min(ctxLow, taskSimple);
+  // Fuzzy rules for model selection (USER PREFERENCE: Opus over Haiku)
+  // Rule 1: If context is CRITICALLY low (<10%) AND task is simple -> use flash
+  const rule1 = Math.min(ctxLow * 0.5, taskSimple); // Reduced weight
 
-  // Rule 2: If context is low AND task is moderate -> use haiku
+  // Rule 2: If context is CRITICALLY low AND task is moderate -> use sonnet (not haiku)
   const rule2 = Math.min(ctxLow, taskModerate);
 
-  // Rule 3: If context is medium AND task is simple -> use haiku
+  // Rule 3: If context is medium AND task is simple -> use opus (user preference)
   const rule3 = Math.min(ctxMed, taskSimple);
 
-  // Rule 4: If context is medium AND task is moderate -> use sonnet
+  // Rule 4: If context is medium AND task is moderate -> use opus (user preference)
   const rule4 = Math.min(ctxMed, taskModerate);
 
   // Rule 5: If context is high AND task is complex -> use opus
@@ -114,14 +114,17 @@ export function decideCognitiveAllocation(
   // Rule 6: If task is complex AND urgency is high -> use opus
   const rule6 = Math.min(taskComplex, urgHigh);
 
-  // Rule 7: If context is high AND task is moderate -> use sonnet
+  // Rule 7: If context is high AND task is moderate -> use opus (user preference)
   const rule7 = Math.min(ctxHigh, taskModerate);
 
-  // Defuzzification: weighted average
-  let flashScore = rule1;
-  let haikuScore = Math.max(rule2, rule3);
-  let sonnetScore = Math.max(rule4, rule7);
-  let opusScore = Math.max(rule5, rule6);
+  // Rule 8: Default preference for opus (quality over cost)
+  const rule8 = 0.6; // Base opus preference
+
+  // Defuzzification: weighted average (PRIORITIZE OPUS)
+  let flashScore = rule1 * 0.3; // Heavily penalize flash
+  let haikuScore = 0; // DISABLED - user doesn't want haiku
+  let sonnetScore = rule2; // Only for critically low context
+  let opusScore = Math.max(rule3, rule4, rule5, rule6, rule7, rule8); // Strongly prefer opus
 
   // Adjust based on previous attempts (more attempts -> need smarter model)
   if (previousAttempts > 0) {
@@ -146,9 +149,9 @@ export function decideCognitiveAllocation(
   scores.sort((a, b) => b.score - a.score);
   const selectedModel = scores[0].model;
 
-  // Determine thinking level
+  // Determine thinking level (opus-first strategy)
   let thinkingLevel: ThinkLevel = "off";
-  if (selectedModel === "opus" || selectedModel === "sonnet") {
+  if (selectedModel === "opus") {
     if (taskComplex > 0.7 || urgency > 0.7) {
       thinkingLevel = "high";
     } else if (taskModerate > 0.5) {
@@ -156,8 +159,15 @@ export function decideCognitiveAllocation(
     } else {
       thinkingLevel = "low";
     }
-  } else if (selectedModel === "haiku") {
-    thinkingLevel = taskComplex > 0.5 ? "low" : "off";
+  } else if (selectedModel === "sonnet") {
+    if (taskComplex > 0.5) {
+      thinkingLevel = "medium";
+    } else {
+      thinkingLevel = "low";
+    }
+  } else if (selectedModel === "haiku" || selectedModel === "flash") {
+    // Fallback only - should rarely happen
+    thinkingLevel = "off";
   }
 
   // Determine tool depth

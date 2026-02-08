@@ -19,6 +19,8 @@ export const initialState: DashboardState = {
   selectedSessionIndex: 0,
   sessionDrillKey: null,
   activityScrollOffset: 0,
+  activitySelectedIndex: 0,
+  expandedActivityIndex: null,
   sessionScrollOffset: 0,
 };
 
@@ -98,7 +100,13 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       return { ...state, activityFeed: pushActivity(state.activityFeed, action.entry) };
 
     case "CLEAR_ACTIVITY":
-      return { ...state, activityFeed: [], activityScrollOffset: 0 };
+      return {
+        ...state,
+        activityFeed: [],
+        activityScrollOffset: 0,
+        activitySelectedIndex: 0,
+        expandedActivityIndex: null,
+      };
 
     case "TICK":
       return { ...state, uptimeMs: action.uptimeMs };
@@ -117,6 +125,14 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
 
     case "SCROLL_ACTIVITY":
       return { ...state, activityScrollOffset: action.offset };
+
+    case "SELECT_ACTIVITY":
+      return { ...state, activitySelectedIndex: action.index };
+
+    case "TOGGLE_EXPAND_ACTIVITY": {
+      const isExpanded = state.expandedActivityIndex === action.index;
+      return { ...state, expandedActivityIndex: isExpanded ? null : action.index };
+    }
 
     case "SCROLL_SESSION":
       return { ...state, sessionScrollOffset: action.offset };
@@ -146,18 +162,21 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
             typeof payload.data === "object" && payload.data
               ? (payload.data as Record<string, unknown>)
               : {};
-          const agentId = typeof payload.agentId === "string" ? payload.agentId : undefined;
+          const stream = typeof payload.stream === "string" ? payload.stream : "";
+          const sessionKey = typeof payload.sessionKey === "string" ? payload.sessionKey : "";
+          const agentId = sessionKey.includes(":") ? sessionKey.split(":")[0] : sessionKey;
           const runId = typeof payload.runId === "string" ? payload.runId : undefined;
-          if (agentId && runId) {
-            const lifecycle = data.lifecycle ?? data.event;
-            if (lifecycle === "start" || lifecycle === "run_start") {
+
+          if (agentId && runId && stream === "lifecycle") {
+            const phase = data.phase;
+            if (phase === "start") {
               const agents = next.agents.map((a) =>
                 a.id === agentId
                   ? { ...a, activeRuns: a.activeRuns + 1, lastActivityTs: Date.now() }
                   : a,
               );
               next = { ...next, agents };
-            } else if (lifecycle === "end" || lifecycle === "run_end" || lifecycle === "done") {
+            } else if (phase === "end" || phase === "error") {
               const agents = next.agents.map((a) =>
                 a.id === agentId
                   ? { ...a, activeRuns: Math.max(0, a.activeRuns - 1), lastActivityTs: Date.now() }
@@ -172,7 +191,16 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       // Add to activity feed (skip noisy tick events)
       if (evt.event !== "tick") {
         const entry = formatGatewayEvent(evt);
-        next = { ...next, activityFeed: pushActivity(next.activityFeed, entry) };
+        const newFeed = pushActivity(next.activityFeed, entry);
+        // Auto-follow: if user was at the latest entry, keep them there
+        const wasAtEnd =
+          next.activitySelectedIndex >= next.activityFeed.length - 1 ||
+          next.activityFeed.length === 0;
+        next = {
+          ...next,
+          activityFeed: newFeed,
+          activitySelectedIndex: wasAtEnd ? newFeed.length - 1 : next.activitySelectedIndex,
+        };
       }
 
       return next;

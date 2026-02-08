@@ -77,22 +77,23 @@ function Dashboard({ client }: AppProps) {
       }
     } else if (state.focusedPanel === "activity") {
       if (key.upArrow || input === "k") {
-        dispatch({
-          type: "SCROLL_ACTIVITY",
-          offset: Math.max(0, state.activityScrollOffset - 1),
-        });
+        const newIndex = Math.max(0, state.activitySelectedIndex - 1);
+        dispatch({ type: "SELECT_ACTIVITY", index: newIndex });
       } else if (key.downArrow || input === "j") {
-        dispatch({
-          type: "SCROLL_ACTIVITY",
-          offset: state.activityScrollOffset + 1,
-        });
+        const newIndex = Math.min(state.activityFeed.length - 1, state.activitySelectedIndex + 1);
+        dispatch({ type: "SELECT_ACTIVITY", index: newIndex });
+      } else if (key.return) {
+        // Toggle expand on the selected entry
+        dispatch({ type: "TOGGLE_EXPAND_ACTIVITY", index: state.activitySelectedIndex });
+      } else if (key.escape) {
+        // Collapse any expanded entry
+        dispatch({ type: "TOGGLE_EXPAND_ACTIVITY", index: state.expandedActivityIndex ?? -1 });
       } else if (input === "g") {
+        dispatch({ type: "SELECT_ACTIVITY", index: 0 });
         dispatch({ type: "SCROLL_ACTIVITY", offset: 0 });
       } else if (input === "G") {
-        dispatch({
-          type: "SCROLL_ACTIVITY",
-          offset: Math.max(0, state.activityFeed.length - 1),
-        });
+        const lastIndex = Math.max(0, state.activityFeed.length - 1);
+        dispatch({ type: "SELECT_ACTIVITY", index: lastIndex });
       } else if (input === "c") {
         dispatch({ type: "CLEAR_ACTIVITY" });
       }

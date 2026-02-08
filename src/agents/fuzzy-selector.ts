@@ -150,11 +150,12 @@ export function selectModelFuzzy(params: FuzzySelectionParams): FuzzySelectionRe
     };
   }
 
-  // Low-end model selection (Machine Gun tier)
-  if (taskComplexity < 0.2 || weight < 0.1) {
+  // Prefer Opus for most tasks (user preference: quality over cost)
+  // Only use Haiku for very simple tasks with critical context constraints
+  if ((taskComplexity < 0.1 || weight < 0.05) && contextBudget < 0.1) {
     return {
       provider: defaultProvider,
-      model: "claude-haiku-4-5", // Machine Gun - fast and cheap
+      model: "claude-haiku-4-5", // Only for very simple + critical context
       tier: "Machine Gun",
       scores: {
         complexity: taskComplexity,
@@ -165,27 +166,12 @@ export function selectModelFuzzy(params: FuzzySelectionParams): FuzzySelectionRe
     };
   }
 
-  // Medium complexity with urgency → use faster model
-  if (taskComplexity < 0.5 && userUrgency > 0.7) {
-    return {
-      provider: defaultProvider,
-      model: "claude-haiku-4-5", // Fast response for urgent simple tasks
-      tier: "Machine Gun",
-      scores: {
-        complexity: taskComplexity,
-        budget: contextBudget,
-        urgency: userUrgency,
-        weight,
-      },
-    };
-  }
-
-  // Medium complexity → default model (Sonnet tier)
+  // Medium complexity → use Opus (user preference)
   if (taskComplexity < 0.7) {
     return {
       provider: defaultProvider,
-      model: defaultModel, // Default balanced model
-      tier: "Sonnet",
+      model: "claude-opus-4-5", // Prefer Opus for quality
+      tier: "BFG10K",
       scores: {
         complexity: taskComplexity,
         budget: contextBudget,
@@ -195,11 +181,12 @@ export function selectModelFuzzy(params: FuzzySelectionParams): FuzzySelectionRe
     };
   }
 
-  // High complexity but low budget → use efficient model
-  if (contextBudget < 0.3) {
+  // High complexity but low budget → still prefer Opus (user preference)
+  // Only downgrade if context is critically low
+  if (contextBudget < 0.1) {
     return {
       provider: defaultProvider,
-      model: "claude-sonnet-4-5", // Efficient for high complexity
+      model: "claude-sonnet-4-5", // Only for critically low context
       tier: "Sonnet",
       scores: {
         complexity: taskComplexity,

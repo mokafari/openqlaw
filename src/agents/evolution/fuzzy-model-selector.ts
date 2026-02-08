@@ -52,19 +52,21 @@ export class FuzzyModelSelector {
       };
     }
 
-    if (input.userUrgency > 0.8) {
+    // Even with high urgency, prefer Opus for quality (user preference)
+    // Only use Haiku for critical context situations
+    if (input.userUrgency > 0.8 && input.remainingContextPct < 0.15) {
       return {
         modelId: "claude-haiku-4-5",
         provider: "anthropic",
-        rationale: "High user urgency detected. Prioritizing low-latency response.",
+        rationale: "High urgency + critical context. Using efficient model.",
       };
     }
 
-    // Default to the genotype's preferred default
+    // Default to Opus for most tasks (user preference: quality over cost)
     return {
-      modelId: "claude-sonnet-4-5",
+      modelId: "claude-opus-4-5",
       provider: "anthropic",
-      rationale: "Genotype default.",
+      rationale: "Default to Opus for quality (user preference).",
     };
   }
 
@@ -95,19 +97,21 @@ export class FuzzyModelSelector {
       };
     }
 
-    if (input.userUrgency > 0.8) {
+    // Even with high urgency, prefer Opus for quality (user preference)
+    // Only use Haiku for critical context situations
+    if (input.userUrgency > 0.8 && input.remainingContextPct < 0.15) {
       return {
         modelId: "claude-haiku-4-5",
         provider: "anthropic",
-        rationale: "High user urgency detected. Prioritizing low-latency response.",
+        rationale: "High urgency + critical context. Using efficient model.",
       };
     }
 
-    // Default to the genotype's preferred default
+    // Default to Opus for most tasks (user preference: quality over cost)
     return {
-      modelId: "claude-sonnet-4-5",
+      modelId: "claude-opus-4-5",
       provider: "anthropic",
-      rationale: "Genotype default.",
+      rationale: "Default to Opus for quality (user preference).",
     };
   }
 

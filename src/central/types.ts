@@ -27,13 +27,24 @@ export type SessionSummary = {
 };
 
 // ── Activity feed entry ──────────────────────────────────────────────
-export type ActivityKind = "tool" | "completion" | "error" | "state_change" | "info";
+export type ActivityKind =
+  | "tool_start"
+  | "tool_result"
+  | "assistant"
+  | "lifecycle"
+  | "error"
+  | "state_change"
+  | "info";
 
 export type ActivityEntry = {
   ts: number;
   agentId: string;
   kind: ActivityKind;
   summary: string;
+  /** Raw event payload for drill-in inspection. */
+  payload: Record<string, unknown>;
+  /** Gateway event name (e.g. "agent", "chat", "health"). */
+  eventName: string;
 };
 
 // ── Health summary (loose shape — gateway returns opaque payload) ────
@@ -55,6 +66,8 @@ export type DashboardState = {
   selectedSessionIndex: number;
   sessionDrillKey: string | null;
   activityScrollOffset: number;
+  activitySelectedIndex: number;
+  expandedActivityIndex: number | null;
   sessionScrollOffset: number;
 };
 
@@ -76,6 +89,8 @@ export type DashboardAction =
   | { type: "SELECT_SESSION"; index: number }
   | { type: "DRILL_SESSION"; key: string | null }
   | { type: "SCROLL_ACTIVITY"; offset: number }
+  | { type: "SELECT_ACTIVITY"; index: number }
+  | { type: "TOGGLE_EXPAND_ACTIVITY"; index: number }
   | { type: "SCROLL_SESSION"; offset: number }
   | { type: "GATEWAY_EVENT"; event: EventFrame };
 
