@@ -1,8 +1,10 @@
+import { getReflexionSystem } from "./reflexion.js";
+
 /**
  * Build a specialized system prompt for diagnostic agents.
  * These agents are spawned to analyze tool failures and propose fixes.
  */
-export function buildDiagnosticAgentPrompt(params: {
+export async function buildDiagnosticAgentPrompt(params: {
   toolName: string;
   errorRate: number;
   failingSessions: Array<{ sessionId: string; error: string; timestamp: number }>;
@@ -22,6 +24,49 @@ export function buildDiagnosticAgentPrompt(params: {
   lines.push(`- **Tool Name**: ${params.toolName}`);
   lines.push(`- **Error Rate**: ${(params.errorRate * 100).toFixed(1)}%`);
   lines.push(`- **Failing Sessions**: ${params.failingSessions.length} recent failures`);
+  lines.push("");
+
+  // Add reflexion insights if available
+  try {
+    const reflexion = getReflexionSystem();
+    const suggestions = await reflexion.generateImprovementSuggestions();
+    if (suggestions.length > 0) {
+      lines.push(`## Reflexion Insights`);
+      lines.push(``);
+      lines.push(`Recent failure analysis suggests:`);
+      for (const suggestion of suggestions.slice(0, 5)) {
+        lines.push(`- ${suggestion}`);
+      }
+      lines.push(``);
+    }
+
+    // Get tool-specific reflexion episodes
+    const episodes = await reflexion.getRecentEpisodes(20);
+    const toolEpisodes = episodes
+      .filter(
+        (ep) =>
+          ep.toolsUsed.includes(params.toolName) &&
+          (ep.outcome === "failure" || ep.outcome === "aborted"),
+      )
+      .slice(0, 3);
+
+    if (toolEpisodes.length > 0) {
+      lines.push(`## Recent ${params.toolName} Failures`);
+      lines.push(``);
+      for (const ep of toolEpisodes) {
+        lines.push(
+          `**${ep.timestamp.split("T")[0]}** (h=${ep.heuristic.toFixed(2)}): ${ep.task.slice(0, 80)}`,
+        );
+        if (ep.reflection?.lessonsLearned) {
+          lines.push(`Lessons: ${ep.reflection.lessonsLearned.slice(0, 2).join("; ")}`);
+        }
+        lines.push(``);
+      }
+    }
+  } catch (err) {
+    // Reflexion data not available, continue without it
+  }
+
   lines.push("");
 
   if (params.sourceFile) {

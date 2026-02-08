@@ -4,6 +4,12 @@ import type { ToolErrorInfo } from "./telemetry.js";
 import { logDebug } from "../../logger.js";
 import { deriveSatisfactionScore, type SatisfactionSignals } from "./auto-satisfaction.js";
 import { loadGenotype, applyGenotypeToSystemPrompt } from "./genotype.js";
+import {
+  getReflexionSystem,
+  type ReflexionEpisode,
+  type TrajectoryStep,
+  type EpisodeOutcome,
+} from "./reflexion.js";
 import { logSessionStats } from "./telemetry.js";
 
 /**
@@ -98,9 +104,99 @@ export async function logAgentRunTelemetry(params: {
       toolErrors: Object.keys(toolErrors).length > 0 ? toolErrors : undefined,
       userSatisfaction,
     });
+
+    // Log reflexion episode for failure analysis
+    await logReflexionEpisode({
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      meta: params.meta,
+      toolMetas: params.toolMetas,
+      toolErrors,
+      userSatisfaction,
+      contextText: params.contextText,
+      goals: params.goals,
+    });
   } catch (err) {
     // Don't fail agent runs if telemetry fails
     logDebug(`[evolution] Failed to log telemetry: ${String(err)}`);
+  }
+}
+
+/**
+ * Log a reflexion episode for learning from session outcomes.
+ * Creates a trajectory from tool metas and calculates heuristic from session stats.
+ */
+async function logReflexionEpisode(params: {
+  sessionId: string;
+  sessionKey?: string;
+  meta: EmbeddedPiRunMeta;
+  toolMetas: Array<{ toolName: string; meta?: string }>;
+  toolErrors: Record<string, ToolErrorInfo>;
+  userSatisfaction: number;
+  contextText?: string;
+  goals?: { initial: Goal[]; final: Goal[] };
+}): Promise<void> {
+  try {
+    const reflexion = getReflexionSystem();
+
+    // Build trajectory from tool calls
+    const trajectory: TrajectoryStep[] = params.toolMetas.map((tool, index) => ({
+      action: `${tool.toolName}${tool.meta ? ": " + tool.meta.slice(0, 50) : ""}`,
+      tool: tool.toolName,
+      thought: index === 0 ? "Starting task execution" : undefined,
+      observation: toolErrors[tool.toolName]
+        ? `Error: ${toolErrors[tool.toolName].lastError}`
+        : "Success",
+      timestamp: new Date(
+        Date.now() -
+          params.meta.durationMs +
+          (index * params.meta.durationMs) / params.toolMetas.length,
+      ).toISOString(),
+      success: !toolErrors[tool.toolName],
+    }));
+
+    // Determine episode outcome
+    let outcome: EpisodeOutcome;
+    if (params.meta.aborted) {
+      outcome = "aborted";
+    } else if (params.meta.error) {
+      outcome = "failure";
+    } else if (params.userSatisfaction < 0.7) {
+      outcome = "partial";
+    } else {
+      outcome = "success";
+    }
+
+    // Calculate heuristic score
+    const heuristic = reflexion.calculateHeuristic(trajectory, params.meta.durationMs);
+
+    // Create task description from goals or context
+    let task = "Execute user request";
+    if (params.goals?.initial.length) {
+      task = params.goals.initial.map((g) => g.description).join("; ") || task;
+    } else if (params.contextText) {
+      task = params.contextText.slice(0, 100) || task;
+    }
+
+    const episode: ReflexionEpisode = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      sessionKey: params.sessionKey,
+      task,
+      trajectory,
+      outcome,
+      heuristic,
+      duration: params.meta.durationMs,
+      toolsUsed: [...new Set(params.toolMetas.map((t) => t.toolName))],
+    };
+
+    await reflexion.logEpisode(episode);
+
+    logDebug(
+      `[reflexion] Logged episode ${episode.id} (${outcome}, h=${heuristic.toFixed(2)}, tools=${episode.toolsUsed.join(",")})`,
+    );
+  } catch (err) {
+    logDebug(`[reflexion] Failed to log episode: ${String(err)}`);
   }
 }
 
