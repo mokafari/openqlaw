@@ -58,6 +58,14 @@ export type MemoryProviderStatus = {
   custom?: Record<string, unknown>;
 };
 
+export type MemoryBrowseEntry = {
+  path: string;
+  topic: string;
+  startLine: number;
+  endLine: number;
+  chunkCount: number;
+};
+
 export interface MemorySearchManager {
   search(
     query: string,
@@ -74,6 +82,7 @@ export interface MemorySearchManager {
     force?: boolean;
     progress?: (update: MemorySyncProgressUpdate) => void;
   }): Promise<void>;
+  browse?(opts?: { path?: string; topic?: string }): MemoryBrowseEntry[];
   probeEmbeddingAvailability(): Promise<MemoryEmbeddingProbeResult>;
   probeVectorAvailability(): Promise<boolean>;
   close?(): Promise<void>;

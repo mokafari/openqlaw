@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chunkMarkdown, listMemoryFiles, normalizeExtraMemoryPaths } from "./internal.js";
+import {
+  chunkMarkdown,
+  extractTopicsFromMarkdown,
+  listMemoryFiles,
+  normalizeExtraMemoryPaths,
+} from "./internal.js";
 
 describe("normalizeExtraMemoryPaths", () => {
   it("trims, resolves, and dedupes paths", () => {
@@ -108,6 +113,68 @@ describe("listMemoryFiles", () => {
       expect(files.some((file) => file.endsWith("linked.md"))).toBe(false);
       expect(files.some((file) => file.endsWith("nested.md"))).toBe(false);
     }
+  });
+});
+
+describe("extractTopicsFromMarkdown", () => {
+  it("extracts multiple ## headers with correct ranges", () => {
+    const content = [
+      "# Title",
+      "",
+      "## Introduction",
+      "Some intro text",
+      "",
+      "## Methods",
+      "Method details",
+      "More details",
+      "",
+      "## Results",
+      "Results here",
+    ].join("\n");
+    const topics = extractTopicsFromMarkdown(content);
+    expect(topics).toHaveLength(3);
+    expect(topics[0].topic).toBe("Introduction");
+    expect(topics[0].startLine).toBe(3);
+    expect(topics[0].endLine).toBe(5);
+    expect(topics[1].topic).toBe("Methods");
+    expect(topics[1].startLine).toBe(6);
+    expect(topics[1].endLine).toBe(9);
+    expect(topics[2].topic).toBe("Results");
+    expect(topics[2].startLine).toBe(10);
+    expect(topics[2].endLine).toBe(11);
+  });
+
+  it("returns single Document topic when no ## headers", () => {
+    const content = "# Just a title\n\nSome content\nMore content";
+    const topics = extractTopicsFromMarkdown(content);
+    expect(topics).toHaveLength(1);
+    expect(topics[0].topic).toBe("Document");
+    expect(topics[0].startLine).toBe(1);
+    expect(topics[0].endLine).toBe(4);
+  });
+
+  it("returns empty array for empty content", () => {
+    expect(extractTopicsFromMarkdown("")).toEqual([]);
+  });
+
+  it("only tracks ## headers, not # or ###", () => {
+    const content = [
+      "# H1 Title",
+      "## H2 Section",
+      "Content",
+      "### H3 Sub",
+      "More content",
+      "## Another H2",
+      "Final",
+    ].join("\n");
+    const topics = extractTopicsFromMarkdown(content);
+    expect(topics).toHaveLength(2);
+    expect(topics[0].topic).toBe("H2 Section");
+    expect(topics[0].startLine).toBe(2);
+    expect(topics[0].endLine).toBe(5);
+    expect(topics[1].topic).toBe("Another H2");
+    expect(topics[1].startLine).toBe(6);
+    expect(topics[1].endLine).toBe(7);
   });
 });
 

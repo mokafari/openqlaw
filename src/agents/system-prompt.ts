@@ -50,10 +50,11 @@ function buildMemorySection(params: {
   if (!params.availableTools.has("memory_search") && !params.availableTools.has("memory_get")) {
     return [];
   }
-  const lines = [
-    "## Memory Recall",
-    "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
-  ];
+  const hasBrowse = params.availableTools.has("memory_browse");
+  const recallSteps = hasBrowse
+    ? "Before answering anything about prior work, decisions, dates, people, preferences, or todos:\n1. If unsure what's in memory, run memory_browse first to see available topics and files.\n2. Run memory_search with a focused query; then use memory_get to pull only the needed lines.\nIf low confidence after search, say you checked."
+    : "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.";
+  const lines = ["## Memory Recall", recallSteps];
   if (params.citationsMode === "off") {
     lines.push(
       "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.",
@@ -246,12 +247,15 @@ export async function buildAgentSystemPrompt(params: {
     gateway: "Restart, apply config, or run updates on the running OpenClaw process",
     agents_list: "List agent ids allowed for sessions_spawn",
     sessions_list: "List other sessions (incl. sub-agents) with filters/last",
-    sessions_history: "Fetch history for another session/sub-agent",
+    sessions_history:
+      "Fetch history for another session/sub-agent (supports offset for pagination)",
     sessions_send: "Send a message to another session/sub-agent",
     sessions_spawn: "Spawn a sub-agent session",
     session_status:
       "Show a /status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
     image: "Analyze an image with the configured image model",
+    memory_browse:
+      "Browse memory topics and structure before searching; lists files and sections with line ranges",
   };
 
   const toolOrder = [
@@ -278,6 +282,7 @@ export async function buildAgentSystemPrompt(params: {
     "sessions_send",
     "session_status",
     "image",
+    "memory_browse",
   ];
 
   const rawToolNames = (params.toolNames ?? []).map((tool) => tool.trim());

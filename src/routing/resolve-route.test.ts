@@ -255,7 +255,7 @@ test("dmScope=per-account-channel-peer uses default accountId when not provided"
 
 describe("parentPeer binding inheritance (thread support)", () => {
   test("thread inherits binding from parent channel when no direct match", () => {
-    const cfg: MoltbotConfig = {
+    const cfg: OpenClawConfig = {
       bindings: [
         {
           agentId: "adecco",

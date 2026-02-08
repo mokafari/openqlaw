@@ -3,7 +3,11 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { resolveUserTimezone } from "../../agents/date-time.js";
 import { buildWorkspaceSkillSnapshot } from "../../agents/skills.js";
 import { ensureSkillsWatcher, getSkillsSnapshotVersion } from "../../agents/skills/refresh.js";
-import { type SessionEntry, updateSessionStore } from "../../config/sessions.js";
+import {
+  type SessionEntry,
+  updateSessionStore,
+  queueSessionUpdate,
+} from "../../config/sessions.js";
 import { buildChannelSummary } from "../../infra/channel-summary.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
 import { drainSystemEventEntries } from "../../infra/system-events.js";
@@ -211,8 +215,10 @@ export async function ensureSkillSnapshot(params: {
     };
     sessionStore[sessionKey] = { ...sessionStore[sessionKey], ...nextEntry };
     if (storePath) {
-      await updateSessionStore(storePath, (store) => {
-        store[sessionKey] = { ...store[sessionKey], ...nextEntry };
+      queueSessionUpdate({
+        storePath,
+        sessionKey,
+        update: nextEntry,
       });
     }
     systemSent = true;
@@ -253,8 +259,10 @@ export async function ensureSkillSnapshot(params: {
     };
     sessionStore[sessionKey] = { ...sessionStore[sessionKey], ...nextEntry };
     if (storePath) {
-      await updateSessionStore(storePath, (store) => {
-        store[sessionKey] = { ...store[sessionKey], ...nextEntry };
+      queueSessionUpdate({
+        storePath,
+        sessionKey,
+        update: nextEntry,
       });
     }
   }
@@ -304,11 +312,10 @@ export async function incrementCompactionCount(params: {
     ...updates,
   };
   if (storePath) {
-    await updateSessionStore(storePath, (store) => {
-      store[sessionKey] = {
-        ...store[sessionKey],
-        ...updates,
-      };
+    queueSessionUpdate({
+      storePath,
+      sessionKey,
+      update: updates,
     });
   }
   return nextCount;

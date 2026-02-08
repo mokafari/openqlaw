@@ -22,6 +22,11 @@ const MemoryGetSchema = Type.Object({
   lines: Type.Optional(Type.Number()),
 });
 
+const MemoryBrowseSchema = Type.Object({
+  path: Type.Optional(Type.String()),
+  topic: Type.Optional(Type.String()),
+});
+
 export function createMemorySearchTool(options: {
   config?: OpenClawConfig;
   agentSessionKey?: string;
@@ -129,6 +134,57 @@ export function createMemoryGetTool(options: {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return jsonResult({ path: relPath, text: "", disabled: true, error: message });
+      }
+    },
+  };
+}
+
+export function createMemoryBrowseTool(options: {
+  config?: OpenClawConfig;
+  agentSessionKey?: string;
+}): AnyAgentTool | null {
+  const cfg = options.config;
+  if (!cfg) {
+    return null;
+  }
+  const agentId = resolveSessionAgentId({
+    sessionKey: options.agentSessionKey,
+    config: cfg,
+  });
+  if (!resolveMemorySearchConfig(cfg, agentId)) {
+    return null;
+  }
+  return {
+    label: "Memory Browse",
+    name: "memory_browse",
+    description:
+      "Browse memory structure by topic. Lists available topics from MEMORY.md and memory/*.md with line ranges. Use before memory_search to discover what knowledge exists, or to find the right section to read with memory_get.",
+    parameters: MemoryBrowseSchema,
+    execute: async (_toolCallId, params) => {
+      const pathFilter = readStringParam(params, "path");
+      const topicFilter = readStringParam(params, "topic");
+      const { manager, error } = await getMemorySearchManager({
+        cfg,
+        agentId,
+      });
+      if (!manager) {
+        return jsonResult({ topics: [], disabled: true, error });
+      }
+      try {
+        if (!manager.browse) {
+          return jsonResult({
+            topics: [],
+            error: "browse not supported by current memory backend",
+          });
+        }
+        const topics = manager.browse({
+          path: pathFilter || undefined,
+          topic: topicFilter || undefined,
+        });
+        return jsonResult({ topics });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return jsonResult({ topics: [], error: message });
       }
     },
   };

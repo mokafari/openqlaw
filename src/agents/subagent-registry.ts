@@ -34,6 +34,31 @@ let listenerStop: (() => void) | null = null;
 // Use var to avoid TDZ when init runs across circular imports during bootstrap.
 var restoreAttempted = false;
 
+// Batched persistence to reduce disk writes
+const REGISTRY_BATCH_MS = 2_000; // 2 second batch window
+let registryDirty = false;
+let registryTimer: NodeJS.Timeout | null = null;
+
+function markRegistryDirty(): void {
+  registryDirty = true;
+  if (!registryTimer) {
+    registryTimer = setTimeout(() => {
+      flushRegistry();
+    }, REGISTRY_BATCH_MS);
+  }
+}
+
+function flushRegistry(): void {
+  if (!registryDirty) {
+    registryTimer = null;
+    return;
+  }
+
+  persistSubagentRuns(); // Existing persist function
+  registryDirty = false;
+  registryTimer = null;
+}
+
 function persistSubagentRuns() {
   try {
     saveSubagentRegistryToDisk(subagentRuns);
@@ -176,7 +201,7 @@ async function sweepSubagentRuns() {
     }
   }
   if (mutated) {
-    persistSubagentRuns();
+    markRegistryDirty();
   }
   if (subagentRuns.size === 0) {
     stopSweeper();
@@ -201,7 +226,7 @@ function ensureListener() {
       const startedAt = typeof evt.data?.startedAt === "number" ? evt.data.startedAt : undefined;
       if (startedAt) {
         entry.startedAt = startedAt;
-        persistSubagentRuns();
+        markRegistryDirty();
       }
       return;
     }
@@ -216,7 +241,7 @@ function ensureListener() {
     } else {
       entry.outcome = { status: "ok" };
     }
-    persistSubagentRuns();
+    markRegistryDirty();
 
     if (!beginSubagentCleanup(evt.runId)) {
       return;
@@ -249,17 +274,17 @@ function finalizeSubagentCleanup(runId: string, cleanup: "delete" | "keep", didA
   }
   if (cleanup === "delete") {
     subagentRuns.delete(runId);
-    persistSubagentRuns();
+    markRegistryDirty();
     return;
   }
   if (!didAnnounce) {
     // Allow retry on the next wake if the announce failed.
     entry.cleanupHandled = false;
-    persistSubagentRuns();
+    markRegistryDirty();
     return;
   }
   entry.cleanupCompletedAt = Date.now();
-  persistSubagentRuns();
+  markRegistryDirty();
 }
 
 function beginSubagentCleanup(runId: string) {
@@ -274,7 +299,7 @@ function beginSubagentCleanup(runId: string) {
     return false;
   }
   entry.cleanupHandled = true;
-  persistSubagentRuns();
+  markRegistryDirty();
   return true;
 }
 
@@ -310,7 +335,7 @@ export function registerSubagentRun(params: {
     cleanupHandled: false,
   });
   ensureListener();
-  persistSubagentRuns();
+  markRegistryDirty();
   if (archiveAfterMs) {
     startSweeper();
   }
@@ -360,7 +385,7 @@ async function waitForSubagentCompletion(runId: string, waitTimeoutMs: number) {
       wait.status === "error" ? { status: "error", error: waitError } : { status: "ok" };
     mutated = true;
     if (mutated) {
-      persistSubagentRuns();
+      markRegistryDirty();
     }
     if (!beginSubagentCleanup(runId)) {
       return;
@@ -398,18 +423,26 @@ export function resetSubagentRegistryForTests() {
     listenerStop = null;
   }
   listenerStarted = false;
-  persistSubagentRuns();
+
+  // Clean up batching state
+  if (registryTimer) {
+    clearTimeout(registryTimer);
+    registryTimer = null;
+  }
+  registryDirty = false;
+
+  persistSubagentRuns(); // Immediate persistence for test reset
 }
 
 export function addSubagentRunForTests(entry: SubagentRunRecord) {
   subagentRuns.set(entry.runId, entry);
-  persistSubagentRuns();
+  markRegistryDirty();
 }
 
 export function releaseSubagentRun(runId: string) {
   const didDelete = subagentRuns.delete(runId);
   if (didDelete) {
-    persistSubagentRuns();
+    markRegistryDirty();
   }
   if (subagentRuns.size === 0) {
     stopSweeper();
@@ -423,6 +456,11 @@ export function listSubagentRunsForRequester(requesterSessionKey: string): Subag
   }
   return [...subagentRuns.values()].filter((entry) => entry.requesterSessionKey === key);
 }
+
+// Ensure flush on shutdown
+process.on("beforeExit", flushRegistry);
+process.on("SIGTERM", flushRegistry);
+process.on("SIGINT", flushRegistry);
 
 export function initSubagentRegistry() {
   restoreSubagentRunsOnce();

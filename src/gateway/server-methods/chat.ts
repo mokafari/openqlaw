@@ -31,6 +31,7 @@ import {
   validateChatSendParams,
 } from "../protocol/index.js";
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
+import { updateSessionIndexFromTail } from "../session-index.js";
 import {
   capArrayByJsonBytes,
   loadSessionEntry,
@@ -138,6 +139,12 @@ function appendAssistantTranscriptMessage(params: {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 
+  try {
+    updateSessionIndexFromTail(transcriptPath);
+  } catch {
+    // best-effort — never block message flow
+  }
+
   return { ok: true, messageId, message: transcriptEntry.message };
 }
 
@@ -196,19 +203,31 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const { sessionKey, limit } = params as {
+    const { sessionKey, limit, offset } = params as {
       sessionKey: string;
       limit?: number;
+      offset?: number;
     };
     const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
     const sessionId = entry?.sessionId;
-    const rawMessages =
-      sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
     const hardMax = 1000;
     const defaultLimit = 200;
     const requested = typeof limit === "number" ? limit : defaultLimit;
     const max = Math.min(hardMax, requested);
-    const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
+    const rawMessages =
+      sessionId && storePath
+        ? readSessionMessages(sessionId, storePath, entry?.sessionFile, {
+            offset,
+            limit: max,
+          })
+        : [];
+    // When offset is provided, the index already handles positioning — skip tail slice.
+    const sliced =
+      typeof offset === "number"
+        ? rawMessages
+        : rawMessages.length > max
+          ? rawMessages.slice(-max)
+          : rawMessages;
     const sanitized = stripEnvelopeFromMessages(sliced);
     const capped = capArrayByJsonBytes(sanitized, getMaxChatHistoryMessagesBytes()).items;
     let thinkingLevel = entry?.thinkingLevel;
@@ -233,6 +252,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey,
       sessionId,
       messages: capped,
+      totalMessages: rawMessages.length,
       thinkingLevel,
       verboseLevel,
     });
@@ -691,6 +711,12 @@ export const chatHandlers: GatewayRequestHandlers = {
         errorShape(ErrorCodes.UNAVAILABLE, `failed to write transcript: ${errMessage}`),
       );
       return;
+    }
+
+    try {
+      updateSessionIndexFromTail(transcriptPath);
+    } catch {
+      // best-effort — never block message flow
     }
 
     // Broadcast to webchat for immediate UI update

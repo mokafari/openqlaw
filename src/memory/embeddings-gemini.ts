@@ -1,6 +1,7 @@
 import type { EmbeddingProvider, EmbeddingProviderOptions } from "./embeddings.js";
 import { requireApiKey, resolveApiKeyForProvider } from "../agents/model-auth.js";
 import { isTruthyEnvValue } from "../infra/env.js";
+import { http } from "../infra/http/index.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
 export type GeminiEmbeddingClient = {
@@ -74,13 +75,13 @@ export async function createGeminiEmbeddingProvider(
     if (!text.trim()) {
       return [];
     }
-    const res = await fetch(embedUrl, {
-      method: "POST",
+    const res = await http.post(embedUrl, {
       headers: client.headers,
       body: JSON.stringify({
         content: { parts: [{ text }] },
         taskType: "RETRIEVAL_QUERY",
       }),
+      timeoutMs: 60_000, // 60 second timeout for embeddings
     });
     if (!res.ok) {
       const payload = await res.text();
@@ -99,10 +100,10 @@ export async function createGeminiEmbeddingProvider(
       content: { parts: [{ text }] },
       taskType: "RETRIEVAL_DOCUMENT",
     }));
-    const res = await fetch(batchUrl, {
-      method: "POST",
+    const res = await http.post(batchUrl, {
       headers: client.headers,
       body: JSON.stringify({ requests }),
+      timeoutMs: 120_000, // 2 minute timeout for batch embeddings
     });
     if (!res.ok) {
       const payload = await res.text();

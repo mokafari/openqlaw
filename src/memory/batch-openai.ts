@@ -1,4 +1,5 @@
 import type { OpenAiEmbeddingClient } from "./embeddings-openai.js";
+import { http } from "../infra/http/index.js";
 import { retryAsync } from "../infra/retry.js";
 import { hashText } from "./internal.js";
 
@@ -81,10 +82,10 @@ async function submitOpenAiBatch(params: {
     `memory-embeddings.${hashText(String(Date.now()))}.jsonl`,
   );
 
-  const fileRes = await fetch(`${baseUrl}/files`, {
-    method: "POST",
+  const fileRes = await http.post(`${baseUrl}/files`, {
     headers: getOpenAiHeaders(params.openAi, { json: false }),
     body: form,
+    timeoutMs: 120_000, // 2 minute timeout for file uploads
   });
   if (!fileRes.ok) {
     const text = await fileRes.text();
@@ -97,8 +98,7 @@ async function submitOpenAiBatch(params: {
 
   const batchRes = await retryAsync(
     async () => {
-      const res = await fetch(`${baseUrl}/batches`, {
-        method: "POST",
+      const res = await http.post(`${baseUrl}/batches`, {
         headers: getOpenAiHeaders(params.openAi, { json: true }),
         body: JSON.stringify({
           input_file_id: filePayload.id,
@@ -139,8 +139,9 @@ async function fetchOpenAiBatchStatus(params: {
   batchId: string;
 }): Promise<OpenAiBatchStatus> {
   const baseUrl = getOpenAiBaseUrl(params.openAi);
-  const res = await fetch(`${baseUrl}/batches/${params.batchId}`, {
+  const res = await http.get(`${baseUrl}/batches/${params.batchId}`, {
     headers: getOpenAiHeaders(params.openAi, { json: true }),
+    timeoutMs: 30_000, // 30 second timeout for status checks
   });
   if (!res.ok) {
     const text = await res.text();
@@ -154,8 +155,9 @@ async function fetchOpenAiFileContent(params: {
   fileId: string;
 }): Promise<string> {
   const baseUrl = getOpenAiBaseUrl(params.openAi);
-  const res = await fetch(`${baseUrl}/files/${params.fileId}/content`, {
+  const res = await http.get(`${baseUrl}/files/${params.fileId}/content`, {
     headers: getOpenAiHeaders(params.openAi, { json: true }),
+    timeoutMs: 60_000, // 60 second timeout for file downloads
   });
   if (!res.ok) {
     const text = await res.text();

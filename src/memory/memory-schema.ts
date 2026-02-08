@@ -74,6 +74,19 @@ export function ensureMemoryIndexSchema(params: {
     }
   }
 
+  params.db.exec(`
+    CREATE TABLE IF NOT EXISTS manifest (
+      path TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      chunk_count INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (path, topic)
+    );
+  `);
+  params.db.exec(`CREATE INDEX IF NOT EXISTS idx_manifest_path ON manifest(path);`);
+
   ensureColumn(params.db, "files", "source", "TEXT NOT NULL DEFAULT 'memory'");
   ensureColumn(params.db, "chunks", "source", "TEXT NOT NULL DEFAULT 'memory'");
   params.db.exec(`CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);`);

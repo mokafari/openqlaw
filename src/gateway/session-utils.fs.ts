@@ -4,17 +4,28 @@ import path from "node:path";
 import type { SessionPreviewItem } from "./session-utils.types.js";
 import { resolveSessionTranscriptPath } from "../config/sessions.js";
 import { stripEnvelope } from "./chat-sanitize.js";
+import { indexPathForTranscript, readSessionIndex } from "./session-index.js";
 
 export function readSessionMessages(
   sessionId: string,
   storePath: string | undefined,
   sessionFile?: string,
+  opts?: { offset?: number; limit?: number },
 ): unknown[] {
   const candidates = resolveSessionTranscriptCandidates(sessionId, storePath, sessionFile);
 
   const filePath = candidates.find((p) => fs.existsSync(p));
   if (!filePath) {
     return [];
+  }
+
+  // When offset is provided, try index-based random access
+  if (typeof opts?.offset === "number") {
+    const indexed = readSessionMessagesWithIndex(filePath, opts.offset, opts.limit);
+    if (indexed) {
+      return indexed;
+    }
+    // Fall through to full-read if index is missing/corrupt
   }
 
   const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
@@ -33,6 +44,60 @@ export function readSessionMessages(
     }
   }
   return messages;
+}
+
+/**
+ * Read messages at a specific offset using the session index.
+ * Returns null if index is missing or corrupt (caller should fall back).
+ */
+function readSessionMessagesWithIndex(
+  filePath: string,
+  offset: number,
+  limit?: number,
+): unknown[] | null {
+  const idxPath = indexPathForTranscript(filePath);
+  const index = readSessionIndex(idxPath);
+  if (index.length === 0) {
+    return null;
+  }
+
+  const end = typeof limit === "number" ? offset + limit : index.length;
+  const slice = index.slice(offset, end);
+  if (slice.length === 0) {
+    return [];
+  }
+
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const messages: unknown[] = [];
+    for (const entry of slice) {
+      const buf = Buffer.alloc(entry.len);
+      const bytesRead = fs.readSync(fd, buf, 0, entry.len, entry.off);
+      if (bytesRead === 0) {
+        continue;
+      }
+      const line = buf.toString("utf-8", 0, bytesRead).trim();
+      if (!line) {
+        continue;
+      }
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed?.message) {
+          messages.push(parsed.message);
+        }
+      } catch {
+        // skip corrupt entries
+      }
+    }
+    return messages;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) {
+      fs.closeSync(fd);
+    }
+  }
 }
 
 export function resolveSessionTranscriptCandidates(

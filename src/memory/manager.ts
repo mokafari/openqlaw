@@ -40,6 +40,7 @@ import {
   buildFileEntry,
   chunkMarkdown,
   ensureDir,
+  extractTopicsFromMarkdown,
   hashText,
   isMemoryPath,
   listMemoryFiles,
@@ -605,6 +606,40 @@ export class MemoryIndexManager implements MemorySearchManager {
     INDEX_CACHE.delete(this.cacheKey);
   }
 
+  browse(opts?: { path?: string; topic?: string }): Array<{
+    path: string;
+    topic: string;
+    startLine: number;
+    endLine: number;
+    chunkCount: number;
+  }> {
+    let sql = "SELECT path, topic, start_line, end_line, chunk_count FROM manifest WHERE 1=1";
+    const params: string[] = [];
+    if (opts?.path) {
+      sql += " AND path LIKE ?";
+      params.push(`%${opts.path}%`);
+    }
+    if (opts?.topic) {
+      sql += " AND topic LIKE ?";
+      params.push(`%${opts.topic}%`);
+    }
+    sql += " ORDER BY path, start_line";
+    const rows = this.db.prepare(sql).all(...params) as Array<{
+      path: string;
+      topic: string;
+      start_line: number;
+      end_line: number;
+      chunk_count: number;
+    }>;
+    return rows.map((row) => ({
+      path: row.path,
+      topic: row.topic,
+      startLine: row.start_line,
+      endLine: row.end_line,
+      chunkCount: row.chunk_count,
+    }));
+  }
+
   private async ensureVectorReady(dimensions?: number): Promise<boolean> {
     if (!this.vector.enabled) {
       return false;
@@ -1135,6 +1170,8 @@ export class MemoryIndexManager implements MemorySearchManager {
         } catch {}
       }
     }
+
+    await this.generateManifest("memory");
   }
 
   private async syncSessionFiles(params: {
@@ -1236,6 +1273,8 @@ export class MemoryIndexManager implements MemorySearchManager {
         } catch {}
       }
     }
+
+    await this.generateManifest("sessions");
   }
 
   private createSyncProgress(
@@ -2252,6 +2291,59 @@ export class MemoryIndexManager implements MemorySearchManager {
 
   private getIndexConcurrency(): number {
     return this.batch.enabled ? this.batch.concurrency : EMBEDDING_INDEX_CONCURRENCY;
+  }
+
+  private async generateManifest(source: MemorySource): Promise<void> {
+    try {
+      const rows = this.db
+        .prepare("SELECT DISTINCT path FROM files WHERE source = ?")
+        .all(source) as Array<{ path: string }>;
+
+      this.db.exec("BEGIN");
+      try {
+        // Delete old manifest entries for files in this source
+        for (const row of rows) {
+          this.db.prepare("DELETE FROM manifest WHERE path = ?").run(row.path);
+        }
+
+        const now = Date.now();
+        const insert = this.db.prepare(
+          "INSERT INTO manifest (path, topic, start_line, end_line, chunk_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        );
+
+        for (const row of rows) {
+          let content: string;
+          try {
+            const absPath = path.isAbsolute(row.path)
+              ? row.path
+              : path.resolve(this.workspaceDir, row.path);
+            content = fsSync.readFileSync(absPath, "utf-8");
+          } catch {
+            continue;
+          }
+
+          const topics = extractTopicsFromMarkdown(content);
+          for (const topic of topics) {
+            // Count chunks within this topic's line range
+            const chunkRow = this.db
+              .prepare(
+                "SELECT COUNT(*) as c FROM chunks WHERE path = ? AND source = ? AND start_line >= ? AND end_line <= ?",
+              )
+              .get(row.path, source, topic.startLine, topic.endLine) as { c: number } | undefined;
+            const chunkCount = chunkRow?.c ?? 0;
+            insert.run(row.path, topic.topic, topic.startLine, topic.endLine, chunkCount, now);
+          }
+        }
+        this.db.exec("COMMIT");
+      } catch (err) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {}
+        throw err;
+      }
+    } catch (err) {
+      log.debug(`manifest generation failed for source=${source}: ${String(err)}`);
+    }
   }
 
   private async indexFile(

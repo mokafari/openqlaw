@@ -5,5 +5,6 @@ export * from "./sessions/paths.js";
 export * from "./sessions/reset.js";
 export * from "./sessions/session-key.js";
 export * from "./sessions/store.js";
+export * from "./sessions/batched-store.js";
 export * from "./sessions/types.js";
 export * from "./sessions/transcript.js";

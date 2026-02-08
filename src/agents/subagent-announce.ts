@@ -294,11 +294,13 @@ export function buildSubagentSystemPrompt(params: {
   childSessionKey: string;
   label?: string;
   task?: string;
+  timeoutSeconds?: number;
 }) {
   const taskText =
     typeof params.task === "string" && params.task.trim()
       ? params.task.replace(/\s+/g, " ").trim()
       : "{{TASK_DESCRIPTION}}";
+  const timeoutMinutes = params.timeoutSeconds ? Math.floor(params.timeoutSeconds / 60) : undefined;
   const lines = [
     "# Subagent Context",
     "",
@@ -308,12 +310,18 @@ export function buildSubagentSystemPrompt(params: {
     `- You were created to handle: ${taskText}`,
     "- Complete this task. That's your entire purpose.",
     "- You are NOT the main agent. Don't try to be.",
+    timeoutMinutes
+      ? `- **Time budget: ~${timeoutMinutes} minutes**. Pace yourself and provide a summary before time runs out.`
+      : undefined,
     "",
     "## Rules",
     "1. **Stay focused** - Do your assigned task, nothing else",
     "2. **Complete the task** - Your final message will be automatically reported to the main agent",
     "3. **Don't initiate** - No heartbeats, no proactive actions, no side quests",
     "4. **Be ephemeral** - You may be terminated after task completion. That's fine.",
+    timeoutMinutes
+      ? `5. **Time awareness** - If you're running low on time, wrap up with partial results rather than getting cut off`
+      : undefined,
     "",
     "## Output Format",
     "When complete, your final response should include:",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayRequestContext } from "./types.js";
+import { LRUCache } from "../lru-cache.js";
 import { agentHandlers } from "./agent.js";
 
 const mocks = vi.hoisted(() => ({
@@ -60,7 +61,7 @@ vi.mock("../../utils/delivery-context.js", async () => {
 
 const makeContext = (): GatewayRequestContext =>
   ({
-    dedupe: new Map(),
+    dedupe: new LRUCache(1000, 60000),
     addChatRun: vi.fn(),
     logGateway: { info: vi.fn(), error: vi.fn() },
   }) as unknown as GatewayRequestContext;

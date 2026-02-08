@@ -1,0 +1,54 @@
+*** Begin Patch ***
+diff --git a/src/agents/pi-embedded-runner/runs.ts b/src/agents/pi-embedded-runner/runs.ts
+index 1234567..abcdefg 100644
+--- a/src/agents/pi-embedded-runner/runs.ts
++++ b/src/agents/pi-embedded-runner/runs.ts
+@@ -2,6 +2,7 @@ import {
+   diagnosticLogger as diag,
+   logMessageQueued,
+   logSessionStateChange,
+ } from "../../logging/diagnostic.js";
++import { getReflexionSystem } from "../evolution/reflexion.js";
+ 
+ type EmbeddedPiQueueHandle = {
+   queueMessage: (text: string) => Promise<void>;
+@@ -103,6 +104,23 @@ function notifyEmbeddedRunEnded(sessionId: string) {
+   }
+ }
+ 
++async function logReflexionEpisode(sessionId: string) {
++  try {
++    const reflexion = getReflexionSystem();
++    // Create basic episode with limited information available at this level
++    const episode = {
++      id: crypto.randomUUID(),
++      timestamp: new Date().toISOString(),
++      sessionKey: sessionId,
++      task: `Session ${sessionId.slice(0, 8)}`, // Limited task info available here
++      trajectory: [], // Would need session context to populate
++      outcome: "success" as const, // Assuming success if run completed normally
++      heuristic: 0.8, // Default heuristic, would need actual metrics
++      duration: 0, // Would need timing information
++      toolsUsed: [], // Would need session context to populate
++    };
++    await reflexion.logEpisode(episode);
++  } catch (err) {
++    diag.debug(`reflexion logging failed: ${err}`);
++  }
++}
++
+ export function setActiveEmbeddedRun(sessionId: string, handle: EmbeddedPiQueueHandle) {
+   const wasActive = ACTIVE_EMBEDDED_RUNS.has(sessionId);
+   ACTIVE_EMBEDDED_RUNS.set(sessionId, handle);
+@@ -118,6 +136,9 @@ export function clearActiveEmbeddedRun(sessionId: string, handle: EmbeddedPiQue
+   if (ACTIVE_EMBEDDED_RUNS.get(sessionId) === handle) {
+     ACTIVE_EMBEDDED_RUNS.delete(sessionId);
+     logSessionStateChange({ sessionId, state: "idle", reason: "run_completed" });
++    
++    // Log episode to reflexion system
++    void logReflexionEpisode(sessionId);
++    
+     if (!sessionId.startsWith("probe-")) {
+       diag.debug(`run cleared: sessionId=${sessionId} totalActive=${ACTIVE_EMBEDDED_RUNS.size}`);
+     }
+*** End Patch ***

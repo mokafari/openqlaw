@@ -246,6 +246,56 @@ export function chunkMarkdown(
   return chunks;
 }
 
+export type MemoryTopic = {
+  topic: string;
+  startLine: number;
+  endLine: number;
+};
+
+/**
+ * Extract level-2 (##) markdown headings as topic regions.
+ * Each heading starts a topic; the previous topic ends at the line before.
+ * Returns [] for empty content, or a single "Document" entry if no ## headers.
+ */
+export function extractTopicsFromMarkdown(content: string): MemoryTopic[] {
+  if (!content) {
+    return [];
+  }
+  const lines = content.split("\n");
+  if (lines.length === 0) {
+    return [];
+  }
+  const totalLines = lines.length;
+  const headings: Array<{ topic: string; startLine: number }> = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Match "## " prefix (level-2 headings only)
+    const match = line?.match(/^##\s+(.+)/);
+    if (match?.[1]) {
+      headings.push({ topic: match[1].trim(), startLine: i + 1 });
+    }
+  }
+
+  if (headings.length === 0) {
+    return [{ topic: "Document", startLine: 1, endLine: totalLines }];
+  }
+
+  const topics: MemoryTopic[] = [];
+  for (let i = 0; i < headings.length; i++) {
+    const heading = headings[i];
+    const nextHeading = headings[i + 1];
+    const endLine = nextHeading ? nextHeading.startLine - 1 : totalLines;
+    topics.push({
+      topic: heading.topic,
+      startLine: heading.startLine,
+      endLine,
+    });
+  }
+
+  return topics;
+}
+
 export function parseEmbedding(raw: string): number[] {
   try {
     const parsed = JSON.parse(raw) as number[];

@@ -21,9 +21,17 @@ const memoryCorePlugin = {
         if (!memorySearchTool || !memoryGetTool) {
           return null;
         }
-        return [memorySearchTool, memoryGetTool];
+        const tools = [memorySearchTool, memoryGetTool];
+        const memoryBrowseTool = api.runtime.tools.createMemoryBrowseTool({
+          config: ctx.config,
+          agentSessionKey: ctx.sessionKey,
+        });
+        if (memoryBrowseTool) {
+          tools.push(memoryBrowseTool);
+        }
+        return tools;
       },
-      { names: ["memory_search", "memory_get"] },
+      { names: ["memory_search", "memory_get", "memory_browse"] },
     );
 
     api.registerCli(

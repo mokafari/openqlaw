@@ -12,6 +12,7 @@ import type { HealthSummary } from "../commands/health.js";
 import type { NodeEventContext } from "./server-node-events-types.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
+import { LRUCache } from "./lru-cache.js";
 import { handleNodeEvent } from "./server-node-events.js";
 
 const enqueueSystemEventMock = vi.mocked(enqueueSystemEvent);
@@ -31,7 +32,7 @@ function buildCtx(): NodeEventContext {
     chatAbortedRuns: new Map(),
     chatRunBuffers: new Map(),
     chatDeltaSentAt: new Map(),
-    dedupe: new Map(),
+    dedupe: new LRUCache(1000, 60000),
     agentRunSeq: new Map(),
     getHealthCache: () => null,
     refreshHealthSnapshot: async () => ({}) as HealthSummary,

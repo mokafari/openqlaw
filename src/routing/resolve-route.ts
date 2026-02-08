@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/config.js";
+import type { AgentBinding } from "../config/types.agents.js";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { listBindings } from "./bindings.js";
 import {
@@ -49,6 +50,110 @@ export type ResolvedAgentRoute = {
 
 export { DEFAULT_ACCOUNT_ID, DEFAULT_AGENT_ID } from "./session-key.js";
 
+// Route resolution cache
+const routeCache = new Map<string, { route: ResolvedAgentRoute; expires: number }>();
+const CACHE_TTL_MS = 5_000;
+
+function getCachedRoute(key: string): ResolvedAgentRoute | null {
+  const cached = routeCache.get(key);
+  if (cached && cached.expires > Date.now()) {
+    return cached.route;
+  }
+  routeCache.delete(key); // Clean expired
+  return null;
+}
+
+export function clearRouteCache(): void {
+  routeCache.clear();
+  clearBindingIndex();
+}
+
+// Indexed Binding Lookup for O(1) performance
+type BindingIndex = {
+  byPeer: Map<string, AgentBinding[]>; // key: "channel:account:kind:id"
+  byGuild: Map<string, AgentBinding[]>; // key: "channel:account:guildId"
+  byTeam: Map<string, AgentBinding[]>; // key: "channel:account:teamId"
+  byAccount: Map<string, AgentBinding[]>; // key: "channel:account"
+  byChannel: Map<string, AgentBinding[]>; // key: "channel:*"
+};
+
+let bindingIndex: BindingIndex | null = null;
+let bindingIndexCfgHash: string | null = null;
+
+function getBindingIndex(cfg: OpenClawConfig): BindingIndex {
+  const cfgHash = JSON.stringify(cfg.bindings || []);
+  if (bindingIndex && bindingIndexCfgHash === cfgHash) {
+    return bindingIndex;
+  }
+
+  bindingIndex = buildBindingIndex(cfg);
+  bindingIndexCfgHash = cfgHash;
+  return bindingIndex;
+}
+
+function buildBindingIndex(cfg: OpenClawConfig): BindingIndex {
+  const bindings = listBindings(cfg);
+  const index: BindingIndex = {
+    byPeer: new Map(),
+    byGuild: new Map(),
+    byTeam: new Map(),
+    byAccount: new Map(),
+    byChannel: new Map(),
+  };
+
+  for (const binding of bindings) {
+    if (!binding || typeof binding !== "object") {
+      continue;
+    }
+
+    const channel = normalizeToken(binding.match?.channel) || "";
+    const accountId = binding.match?.accountId || "*";
+
+    // Index by specificity level
+    if (binding.match?.peer) {
+      const key = `${channel}:${accountId}:${binding.match.peer.kind}:${binding.match.peer.id}`;
+      addToIndex(index.byPeer, key, binding);
+    }
+
+    if (binding.match?.guildId) {
+      const key = `${channel}:${accountId}:${binding.match.guildId}`;
+      addToIndex(index.byGuild, key, binding);
+    }
+
+    if (binding.match?.teamId) {
+      const key = `${channel}:${accountId}:${binding.match.teamId}`;
+      addToIndex(index.byTeam, key, binding);
+    }
+
+    // Index account-specific bindings (no peer/guild/team)
+    if (!binding.match?.peer && !binding.match?.guildId && !binding.match?.teamId) {
+      if (accountId !== "*") {
+        const key = `${channel}:${accountId}`;
+        addToIndex(index.byAccount, key, binding);
+      } else {
+        // Wildcard account bindings
+        const key = `${channel}:*`;
+        addToIndex(index.byChannel, key, binding);
+      }
+    }
+  }
+
+  return index;
+}
+
+function addToIndex(map: Map<string, AgentBinding[]>, key: string, binding: AgentBinding): void {
+  if (!map.has(key)) {
+    map.set(key, []);
+  }
+  map.get(key)!.push(binding);
+}
+
+// Clear binding index when route cache is cleared
+export function clearBindingIndex(): void {
+  bindingIndex = null;
+  bindingIndexCfgHash = null;
+}
+
 function normalizeToken(value: string | undefined | null): string {
   return (value ?? "").trim().toLowerCase();
 }
@@ -62,16 +167,7 @@ function normalizeAccountId(value: string | undefined | null): string {
   return trimmed ? trimmed : DEFAULT_ACCOUNT_ID;
 }
 
-function matchesAccountId(match: string | undefined, actual: string): boolean {
-  const trimmed = (match ?? "").trim();
-  if (!trimmed) {
-    return actual === DEFAULT_ACCOUNT_ID;
-  }
-  if (trimmed === "*") {
-    return true;
-  }
-  return trimmed === actual;
-}
+// Note: matchesAccountId function removed - now using indexed lookup for O(1) performance
 
 export function buildAgentSessionKey(params: {
   agentId: string;
@@ -118,51 +214,7 @@ function pickFirstExistingAgentId(cfg: OpenClawConfig, agentId: string): string 
   return sanitizeAgentId(resolveDefaultAgentId(cfg));
 }
 
-function matchesChannel(
-  match: { channel?: string | undefined } | undefined,
-  channel: string,
-): boolean {
-  const key = normalizeToken(match?.channel);
-  if (!key) {
-    return false;
-  }
-  return key === channel;
-}
-
-function matchesPeer(
-  match: { peer?: { kind?: string; id?: string } | undefined } | undefined,
-  peer: RoutePeer,
-): boolean {
-  const m = match?.peer;
-  if (!m) {
-    return false;
-  }
-  const kind = normalizeToken(m.kind);
-  const id = normalizeId(m.id);
-  if (!kind || !id) {
-    return false;
-  }
-  return kind === peer.kind && id === peer.id;
-}
-
-function matchesGuild(
-  match: { guildId?: string | undefined } | undefined,
-  guildId: string,
-): boolean {
-  const id = normalizeId(match?.guildId);
-  if (!id) {
-    return false;
-  }
-  return id === guildId;
-}
-
-function matchesTeam(match: { teamId?: string | undefined } | undefined, teamId: string): boolean {
-  const id = normalizeId(match?.teamId);
-  if (!id) {
-    return false;
-  }
-  return id === teamId;
-}
+// Note: Legacy matching functions removed - now using indexed lookup for O(1) performance
 
 export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentRoute {
   const channel = normalizeToken(input.channel);
@@ -171,15 +223,13 @@ export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentR
   const guildId = normalizeId(input.guildId);
   const teamId = normalizeId(input.teamId);
 
-  const bindings = listBindings(input.cfg).filter((binding) => {
-    if (!binding || typeof binding !== "object") {
-      return false;
-    }
-    if (!matchesChannel(binding.match, channel)) {
-      return false;
-    }
-    return matchesAccountId(binding.match?.accountId, accountId);
-  });
+  // Check cache first
+  const cacheKey = `${channel}:${accountId}:${peer?.kind || "null"}:${peer?.id || "null"}`;
+  const cached = getCachedRoute(cacheKey);
+  if (cached) return cached;
+
+  // Get indexed bindings for O(1) lookup
+  const index = getBindingIndex(input.cfg);
 
   const dmScope = input.cfg.session?.dmScope ?? "main";
   const identityLinks = input.cfg.session?.identityLinks;
@@ -208,53 +258,74 @@ export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentR
     };
   };
 
+  // 1. Check peer binding (highest priority)
   if (peer) {
-    const peerMatch = bindings.find((b) => matchesPeer(b.match, peer));
-    if (peerMatch) {
-      return choose(peerMatch.agentId, "binding.peer");
+    const peerKey = `${channel}:${accountId}:${peer.kind}:${peer.id}`;
+    const peerBindings = index.byPeer.get(peerKey);
+    if (peerBindings && peerBindings.length > 0) {
+      const result = choose(peerBindings[0].agentId, "binding.peer");
+      routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+      return result;
     }
   }
 
-  // Thread parent inheritance: if peer (thread) didn't match, check parent peer binding
+  // 2. Thread parent inheritance: if peer (thread) didn't match, check parent peer binding
   const parentPeer = input.parentPeer
     ? { kind: input.parentPeer.kind, id: normalizeId(input.parentPeer.id) }
     : null;
   if (parentPeer && parentPeer.id) {
-    const parentPeerMatch = bindings.find((b) => matchesPeer(b.match, parentPeer));
-    if (parentPeerMatch) {
-      return choose(parentPeerMatch.agentId, "binding.peer.parent");
+    const parentPeerKey = `${channel}:${accountId}:${parentPeer.kind}:${parentPeer.id}`;
+    const parentPeerBindings = index.byPeer.get(parentPeerKey);
+    if (parentPeerBindings && parentPeerBindings.length > 0) {
+      const result = choose(parentPeerBindings[0].agentId, "binding.peer.parent");
+      routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+      return result;
     }
   }
 
+  // 3. Check guild binding
   if (guildId) {
-    const guildMatch = bindings.find((b) => matchesGuild(b.match, guildId));
-    if (guildMatch) {
-      return choose(guildMatch.agentId, "binding.guild");
+    const guildKey = `${channel}:${accountId}:${guildId}`;
+    const guildBindings = index.byGuild.get(guildKey);
+    if (guildBindings && guildBindings.length > 0) {
+      const result = choose(guildBindings[0].agentId, "binding.guild");
+      routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+      return result;
     }
   }
 
+  // 4. Check team binding
   if (teamId) {
-    const teamMatch = bindings.find((b) => matchesTeam(b.match, teamId));
-    if (teamMatch) {
-      return choose(teamMatch.agentId, "binding.team");
+    const teamKey = `${channel}:${accountId}:${teamId}`;
+    const teamBindings = index.byTeam.get(teamKey);
+    if (teamBindings && teamBindings.length > 0) {
+      const result = choose(teamBindings[0].agentId, "binding.team");
+      routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+      return result;
     }
   }
 
-  const accountMatch = bindings.find(
-    (b) =>
-      b.match?.accountId?.trim() !== "*" && !b.match?.peer && !b.match?.guildId && !b.match?.teamId,
-  );
-  if (accountMatch) {
-    return choose(accountMatch.agentId, "binding.account");
+  // 5. Check account-specific binding
+  const accountKey = `${channel}:${accountId}`;
+  const accountBindings = index.byAccount.get(accountKey);
+  if (accountBindings && accountBindings.length > 0) {
+    const result = choose(accountBindings[0].agentId, "binding.account");
+    routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+    return result;
   }
 
-  const anyAccountMatch = bindings.find(
-    (b) =>
-      b.match?.accountId?.trim() === "*" && !b.match?.peer && !b.match?.guildId && !b.match?.teamId,
-  );
-  if (anyAccountMatch) {
-    return choose(anyAccountMatch.agentId, "binding.channel");
+  // 6. Check channel wildcard binding
+  const channelKey = `${channel}:*`;
+  const channelBindings = index.byChannel.get(channelKey);
+  if (channelBindings && channelBindings.length > 0) {
+    const result = choose(channelBindings[0].agentId, "binding.channel");
+    routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+    return result;
   }
 
-  return choose(resolveDefaultAgentId(input.cfg), "default");
+  // 7. Default agent
+
+  const result = choose(resolveDefaultAgentId(input.cfg), "default");
+  routeCache.set(cacheKey, { route: result, expires: Date.now() + CACHE_TTL_MS });
+  return result;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayRequestContext } from "./types.js";
+import { LRUCache } from "../lru-cache.js";
 import { sendHandlers } from "./send.js";
 
 const mocks = vi.hoisted(() => ({
@@ -43,7 +44,7 @@ vi.mock("../../config/sessions.js", async () => {
 
 const makeContext = (): GatewayRequestContext =>
   ({
-    dedupe: new Map(),
+    dedupe: new LRUCache(1000, 60000),
   }) as unknown as GatewayRequestContext;
 
 describe("gateway send mirroring", () => {

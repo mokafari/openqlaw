@@ -1,5 +1,6 @@
 import type { EmbeddingProvider, EmbeddingProviderOptions } from "./embeddings.js";
 import { requireApiKey, resolveApiKeyForProvider } from "../agents/model-auth.js";
+import { http } from "../infra/http/index.js";
 
 export type OpenAiEmbeddingClient = {
   baseUrl: string;
@@ -31,10 +32,10 @@ export async function createOpenAiEmbeddingProvider(
     if (input.length === 0) {
       return [];
     }
-    const res = await fetch(url, {
-      method: "POST",
+    const res = await http.post(url, {
       headers: client.headers,
       body: JSON.stringify({ model: client.model, input }),
+      timeoutMs: 60_000, // 60 second timeout for embeddings
     });
     if (!res.ok) {
       const text = await res.text();

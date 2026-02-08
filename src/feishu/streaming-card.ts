@@ -12,6 +12,7 @@
  */
 
 import type { Client } from "@larksuiteoapi/node-sdk";
+import { http } from "../infra/http/index.js";
 import { getChildLogger } from "../logging.js";
 import { resolveFeishuApiBase, resolveFeishuDomain } from "./domain.js";
 
@@ -48,13 +49,13 @@ async function getTenantAccessToken(credentials: FeishuStreamingCredentials): Pr
   }
 
   const apiBase = resolveFeishuApiBase(credentials.domain);
-  const response = await fetch(`${apiBase}/auth/v3/tenant_access_token/internal`, {
-    method: "POST",
+  const response = await http.post(`${apiBase}/auth/v3/tenant_access_token/internal`, {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       app_id: credentials.appId,
       app_secret: credentials.appSecret,
     }),
+    timeoutMs: 15_000, // 15 second timeout for auth requests
   });
 
   const result = (await response.json()) as {
@@ -119,8 +120,7 @@ export async function createStreamingCard(
   };
 
   const apiBase = resolveFeishuApiBase(credentials.domain);
-  const response = await fetch(`${apiBase}/cardkit/v1/cards`, {
-    method: "POST",
+  const response = await http.post(`${apiBase}/cardkit/v1/cards`, {
     headers: {
       Authorization: `Bearer ${await getTenantAccessToken(credentials)}`,
       "Content-Type": "application/json",
@@ -129,6 +129,7 @@ export async function createStreamingCard(
       type: "card_json",
       data: JSON.stringify(cardJson),
     }),
+    timeoutMs: 30_000, // 30 second timeout for card creation
   });
 
   const result = (await response.json()) as {
@@ -187,10 +188,9 @@ export async function updateStreamingCardText(
   sequence: number,
 ): Promise<void> {
   const apiBase = resolveFeishuApiBase(credentials.domain);
-  const response = await fetch(
+  const response = await http.put(
     `${apiBase}/cardkit/v1/cards/${cardId}/elements/${elementId}/content`,
     {
-      method: "PUT",
       headers: {
         Authorization: `Bearer ${await getTenantAccessToken(credentials)}`,
         "Content-Type": "application/json",
@@ -200,6 +200,7 @@ export async function updateStreamingCardText(
         sequence,
         uuid: `stream_${cardId}_${sequence}`,
       }),
+      timeoutMs: 10_000, // 10 second timeout for streaming updates
     },
   );
 
@@ -229,8 +230,7 @@ export async function closeStreamingMode(
   const settings = { config: configObj };
 
   const apiBase = resolveFeishuApiBase(credentials.domain);
-  const response = await fetch(`${apiBase}/cardkit/v1/cards/${cardId}/settings`, {
-    method: "PATCH",
+  const response = await http.patch(`${apiBase}/cardkit/v1/cards/${cardId}/settings`, {
     headers: {
       Authorization: `Bearer ${await getTenantAccessToken(credentials)}`,
       "Content-Type": "application/json; charset=utf-8",
@@ -240,6 +240,7 @@ export async function closeStreamingMode(
       sequence,
       uuid: `close_${cardId}_${sequence}`,
     }),
+    timeoutMs: 15_000, // 15 second timeout for card settings
   });
 
   // Check response

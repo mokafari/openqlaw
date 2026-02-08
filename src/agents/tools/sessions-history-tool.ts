@@ -16,6 +16,7 @@ import {
 const SessionsHistoryToolSchema = Type.Object({
   sessionKey: Type.String(),
   limit: Type.Optional(Type.Number({ minimum: 1 })),
+  offset: Type.Optional(Type.Number({ minimum: 0 })),
   includeTools: Type.Optional(Type.Boolean()),
 });
 
@@ -51,7 +52,8 @@ export function createSessionsHistoryTool(opts?: {
   return {
     label: "Session History",
     name: "sessions_history",
-    description: "Fetch message history for a session.",
+    description:
+      "Fetch message history for a session. Supports offset for pagination (0-indexed message position).",
     parameters: SessionsHistoryToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -125,16 +127,24 @@ export function createSessionsHistoryTool(opts?: {
         typeof params.limit === "number" && Number.isFinite(params.limit)
           ? Math.max(1, Math.floor(params.limit))
           : undefined;
+      const offset =
+        typeof params.offset === "number" && Number.isFinite(params.offset)
+          ? Math.max(0, Math.floor(params.offset))
+          : undefined;
       const includeTools = Boolean(params.includeTools);
-      const result = await callGateway<{ messages: Array<unknown> }>({
+      const result = await callGateway<{
+        messages: Array<unknown>;
+        totalMessages?: number;
+      }>({
         method: "chat.history",
-        params: { sessionKey: resolvedKey, limit },
+        params: { sessionKey: resolvedKey, limit, offset },
       });
       const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
       const messages = includeTools ? rawMessages : stripToolMessages(rawMessages);
       return jsonResult({
         sessionKey: displayKey,
         messages,
+        totalMessages: result?.totalMessages,
       });
     },
   };

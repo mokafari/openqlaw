@@ -99,6 +99,7 @@ export function createSessionsSpawnTool(opts?: {
         to: opts?.agentTo,
         threadId: opts?.agentThreadId,
       });
+      const DEFAULT_SUBAGENT_TIMEOUT_SECONDS = 600; // 10 minutes
       const runTimeoutSeconds = (() => {
         const explicit =
           typeof params.runTimeoutSeconds === "number" && Number.isFinite(params.runTimeoutSeconds)
@@ -111,7 +112,7 @@ export function createSessionsSpawnTool(opts?: {
           typeof params.timeoutSeconds === "number" && Number.isFinite(params.timeoutSeconds)
             ? Math.max(0, Math.floor(params.timeoutSeconds))
             : undefined;
-        return legacy ?? 0;
+        return legacy ?? DEFAULT_SUBAGENT_TIMEOUT_SECONDS;
       })();
       let modelWarning: string | undefined;
       let modelApplied = false;
@@ -220,6 +221,7 @@ export function createSessionsSpawnTool(opts?: {
         childSessionKey,
         label: label || undefined,
         task,
+        timeoutSeconds: runTimeoutSeconds > 0 ? runTimeoutSeconds : undefined,
       });
 
       const childIdem = crypto.randomUUID();

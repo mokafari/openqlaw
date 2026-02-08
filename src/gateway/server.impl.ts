@@ -23,6 +23,7 @@ import {
   writeConfigFile,
 } from "../config/config.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
+import { flushAllSessionUpdates } from "../config/sessions.js";
 import { clearAgentRunContext, onAgentEvent } from "../infra/agent-events.js";
 import {
   ensureControlUiAssetsBuilt,
@@ -631,6 +632,8 @@ export async function startGatewayServer(
 
   return {
     close: async (opts) => {
+      // Flush any pending batched session updates before shutdown
+      await flushAllSessionUpdates();
       stopEvolutionServices();
       if (diagnosticsEnabled) {
         stopDiagnosticHeartbeat();

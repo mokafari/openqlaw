@@ -81,6 +81,8 @@ type MediaKindFromMime = typeof import("../../media/constants.js").mediaKindFrom
 type IsVoiceCompatibleAudio = typeof import("../../media/audio.js").isVoiceCompatibleAudio;
 type GetImageMetadata = typeof import("../../media/image-ops.js").getImageMetadata;
 type ResizeToJpeg = typeof import("../../media/image-ops.js").resizeToJpeg;
+type CreateMemoryBrowseTool =
+  typeof import("../../agents/tools/memory-tool.js").createMemoryBrowseTool;
 type CreateMemoryGetTool = typeof import("../../agents/tools/memory-tool.js").createMemoryGetTool;
 type CreateMemorySearchTool =
   typeof import("../../agents/tools/memory-tool.js").createMemorySearchTool;
@@ -198,6 +200,7 @@ export type PluginRuntime = {
     textToSpeechTelephony: TextToSpeechTelephony;
   };
   tools: {
+    createMemoryBrowseTool: CreateMemoryBrowseTool;
     createMemoryGetTool: CreateMemoryGetTool;
     createMemorySearchTool: CreateMemorySearchTool;
     registerMemoryCli: RegisterMemoryCli;

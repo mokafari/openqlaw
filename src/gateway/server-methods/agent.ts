@@ -9,6 +9,7 @@ import {
   resolveAgentMainSessionKey,
   type SessionEntry,
   updateSessionStore,
+  queueSessionStoreUpdate,
 } from "../../config/sessions.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import {
@@ -282,8 +283,10 @@ export const agentHandlers: GatewayRequestHandlers = {
       const agentId = resolveAgentIdFromSessionKey(canonicalSessionKey);
       const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
       if (storePath) {
-        await updateSessionStore(storePath, (store) => {
-          store[canonicalSessionKey] = nextEntry;
+        queueSessionStoreUpdate({
+          storePath,
+          sessionKey: canonicalSessionKey,
+          entry: nextEntry,
         });
       }
       if (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global") {

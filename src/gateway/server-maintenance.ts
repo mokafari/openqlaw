@@ -1,4 +1,5 @@
 import type { HealthSummary } from "../commands/health.js";
+import type { LRUCache } from "./lru-cache.js";
 import type { ChatRunEntry } from "./server-chat.js";
 import type { DedupeEntry } from "./server-shared.js";
 import { abortChatRunById, type ChatAbortControllerEntry } from "./chat-abort.js";
@@ -25,7 +26,7 @@ export function startGatewayMaintenanceTimers(params: {
   getHealthVersion: () => number;
   refreshGatewayHealthSnapshot: (opts?: { probe?: boolean }) => Promise<HealthSummary>;
   logHealth: { error: (msg: string) => void };
-  dedupe: Map<string, DedupeEntry>;
+  dedupe: LRUCache<string, DedupeEntry>;
   chatAbortControllers: Map<string, ChatAbortControllerEntry>;
   chatRunState: { abortedRuns: Map<string, number> };
   chatRunBuffers: Map<string, string>;
@@ -71,20 +72,10 @@ export function startGatewayMaintenanceTimers(params: {
     .refreshGatewayHealthSnapshot({ probe: true })
     .catch((err) => params.logHealth.error(`initial refresh failed: ${formatError(err)}`));
 
-  // dedupe cache cleanup
+  // dedupe cache cleanup - LRU cache handles TTL and size automatically, but run cleanup for expired entries
   const dedupeCleanup = setInterval(() => {
-    const now = Date.now();
-    for (const [k, v] of params.dedupe) {
-      if (now - v.ts > DEDUPE_TTL_MS) {
-        params.dedupe.delete(k);
-      }
-    }
-    if (params.dedupe.size > DEDUPE_MAX) {
-      const entries = [...params.dedupe.entries()].toSorted((a, b) => a[1].ts - b[1].ts);
-      for (let i = 0; i < params.dedupe.size - DEDUPE_MAX; i++) {
-        params.dedupe.delete(entries[i][0]);
-      }
-    }
+    // Clean up expired entries in the LRU cache
+    params.dedupe.cleanup();
 
     for (const [runId, entry] of params.chatAbortControllers) {
       if (now <= entry.expiresAtMs) {

@@ -13,6 +13,7 @@ import type { GatewayTlsRuntime } from "./server/tls.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 import { CANVAS_HOST_PATH } from "../canvas-host/a2ui.js";
 import { type CanvasHostHandler, createCanvasHostHandler } from "../canvas-host/server.js";
+import { LRUCache } from "./lru-cache.js";
 import { resolveGatewayListenHosts } from "./net.js";
 import { createGatewayBroadcaster } from "./server-broadcast.js";
 import {
@@ -73,7 +74,7 @@ export async function createGatewayRuntimeState(params: {
     },
   ) => void;
   agentRunSeq: Map<string, number>;
-  dedupe: Map<string, DedupeEntry>;
+  dedupe: LRUCache<string, DedupeEntry>;
   chatRunState: ReturnType<typeof createChatRunState>;
   chatRunBuffers: Map<string, string>;
   chatDeltaSentAt: Map<string, number>;
@@ -170,7 +171,7 @@ export async function createGatewayRuntimeState(params: {
   const clients = new Set<GatewayWsClient>();
   const { broadcast, broadcastToConnIds } = createGatewayBroadcaster({ clients });
   const agentRunSeq = new Map<string, number>();
-  const dedupe = new Map<string, DedupeEntry>();
+  const dedupe = new LRUCache<string, DedupeEntry>(10_000, 60_000);
   const chatRunState = createChatRunState();
   const chatRunRegistry = chatRunState.registry;
   const chatRunBuffers = chatRunState.buffers;

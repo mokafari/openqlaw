@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
+import { updateSessionIndexFromTail } from "../gateway/session-index.js";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
 
@@ -148,6 +149,11 @@ export function installSessionToolResultGuard(
     ).getSessionFile?.();
     if (sessionFile) {
       emitSessionTranscriptUpdate(sessionFile);
+      try {
+        updateSessionIndexFromTail(sessionFile);
+      } catch {
+        // best-effort — never block message flow
+      }
     }
 
     if (toolCalls.length > 0) {
