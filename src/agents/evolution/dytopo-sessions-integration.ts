@@ -107,7 +107,7 @@ export function selectAgentForTask(
   config?: Partial<DyTopoConfig>,
 ): { agentId: string; confidence: number; reasoning: string } {
   const router = createDyTopoRouter({
-    edgeThreshold: 0.3, // Lower threshold to always get a match
+    edgeThreshold: 0.1, // Very low threshold to ensure matching with keyword similarity
     maxEdgesPerAgent: 1,
     useEmbeddings: false,
     logTopology: false,
@@ -182,7 +182,7 @@ export function rankAgentsForTask(
   availableAgents?: string[],
 ): Array<{ agentId: string; score: number; profile: AgentProfile }> {
   const router = createDyTopoRouter({
-    edgeThreshold: 0.1, // Low threshold to rank all agents
+    edgeThreshold: 0.05, // Very low threshold to rank all agents
     maxEdgesPerAgent: 10,
     useEmbeddings: false,
     logTopology: false,

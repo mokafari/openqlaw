@@ -454,6 +454,8 @@ export async function runEmbeddedAttempt(
       fsmState,
       goalStackSummary,
       contextBudget,
+      // Distillation analysis
+      userPrompt: params.prompt,
     });
     const systemPromptReport = buildSystemPromptReport({
       source: "run",

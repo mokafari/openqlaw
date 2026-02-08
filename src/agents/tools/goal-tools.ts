@@ -11,6 +11,7 @@ import type { AnyAgentTool } from "./common.js";
 import { loadConfig } from "../../config/config.js";
 import { loadSessionStore, resolveStorePath, updateSessionStore } from "../../config/sessions.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import { goalTreeIntegration } from "../evolution/tree-of-thoughts/index.js";
 import { logGoalPrediction, logGoalOutcome } from "../goals/meta-integration.js";
 import { GoalStack } from "../goals/stack.js";
 import { visualizeGoalStack, summarizeGoalStack } from "../goals/visualizer.js";
@@ -29,6 +30,8 @@ const GoalPushSchema = Type.Object({
   predictedSuccess: Type.Optional(Type.Number()),
   predictedDurationMs: Type.Optional(Type.Number()),
   predictedDifficulty: Type.Optional(Type.Number()),
+  // Optional Tree of Thoughts integration
+  useTree: Type.Optional(Type.Boolean()),
 });
 
 const GoalPopSchema = Type.Object({
@@ -86,7 +89,7 @@ export function createGoalPushTool(opts?: { agentSessionKey?: string }): AnyAgen
     label: "Goals",
     name: "goal_push",
     description:
-      "Push a new goal onto the goal stack. Use this for multi-step tasks where you need to track progress through obstacles.",
+      "Push a new goal onto the goal stack. Use this for multi-step tasks where you need to track progress through obstacles. Optionally create a Tree of Thoughts for complex goals by setting useTree=true.",
     parameters: GoalPushSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -94,6 +97,7 @@ export function createGoalPushTool(opts?: { agentSessionKey?: string }): AnyAgen
       const type = (params.type as GoalType | undefined) ?? "task";
       const parentId = readStringParam(params, "parentId");
       const metadata = params.metadata as Record<string, unknown> | undefined;
+      const useTree = params.useTree as boolean | undefined;
 
       // Extract prediction overrides
       const predictedSuccess = params.predictedSuccess as number | undefined;
@@ -122,6 +126,18 @@ export function createGoalPushTool(opts?: { agentSessionKey?: string }): AnyAgen
 
       saveGoalStack(internalKey, stack);
 
+      // Optional Tree of Thoughts integration
+      let treeResult = null;
+      if (useTree) {
+        try {
+          treeResult = await goalTreeIntegration.pushGoalWithTree(description);
+          log.info(`[goal_push] Created Tree of Thoughts for goal ${goalId}`);
+        } catch (err) {
+          log.warn(`[goal_push] Failed to create Tree of Thoughts: ${err}`);
+          // Continue without tree - backwards compatibility
+        }
+      }
+
       // Log prediction to meta-learning system (async, non-blocking)
       const goal = stack.getById(goalId);
       if (goal) {
@@ -134,13 +150,28 @@ export function createGoalPushTool(opts?: { agentSessionKey?: string }): AnyAgen
         });
       }
 
-      return jsonResult({
+      const result: Record<string, unknown> = {
         success: true,
         goalId,
         description,
         type,
         stackDepth: stack.getDepth(),
-      });
+      };
+
+      // Include tree information if created
+      if (treeResult) {
+        result.treeOfThoughts = {
+          treeGoalId: treeResult.goalId,
+          rootThoughts: treeResult.rootThoughts.map((t) => ({
+            id: t.id,
+            description: t.description,
+            score: t.evaluation.overallScore,
+          })),
+          nextSteps: treeResult.nextSteps,
+        };
+      }
+
+      return jsonResult(result);
     },
   };
 }

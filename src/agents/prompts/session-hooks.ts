@@ -8,6 +8,63 @@ import {
   type SessionPromptInfo,
 } from "./session-attribution.js";
 
+// Reflexion integration for learning from sessions
+async function logToReflexion(params: {
+  sessionId: string;
+  sessionKey?: string;
+  success: boolean;
+  duration: number;
+  tokens: number;
+  toolCalls: Array<{ tool: string; success: boolean; error?: string }>;
+  task?: string;
+  model?: string;
+}): Promise<void> {
+  try {
+    // Dynamic import to avoid circular deps and allow graceful fallback
+    const { getReflexionSystem } = await import("../evolution/reflexion.js");
+    const reflexion = getReflexionSystem();
+
+    const episode = reflexion.createEpisode({
+      sessionKey: params.sessionKey || params.sessionId,
+      task: params.task || "Session task",
+      model: params.model,
+      taskType: detectTaskType(params.toolCalls),
+    });
+
+    // Add tool calls as trajectory steps
+    for (const call of params.toolCalls) {
+      reflexion.addStep(episode.id, {
+        type: call.success ? "action" : "error",
+        content: call.error || `Tool: ${call.tool}`,
+        tool: call.tool,
+        success: call.success,
+      });
+    }
+
+    // Complete the episode
+    reflexion.completeEpisode(episode.id, {
+      success: params.success,
+      duration: params.duration,
+      tokens: params.tokens,
+    });
+
+    console.log(`[reflexion] Logged episode ${episode.id} (success: ${params.success})`);
+  } catch (err) {
+    // Reflexion module not available - graceful fallback
+    console.debug("[reflexion] Module not available, skipping episode logging");
+  }
+}
+
+function detectTaskType(toolCalls: Array<{ tool: string }>): string {
+  const tools = toolCalls.map((c) => c.tool);
+  if (tools.includes("web_search") || tools.includes("web_fetch")) return "research";
+  if (tools.includes("exec") && tools.includes("Edit")) return "development";
+  if (tools.includes("sessions_spawn")) return "coordination";
+  if (tools.includes("memory_search")) return "memory_retrieval";
+  if (tools.includes("browser")) return "browser_automation";
+  return "general";
+}
+
 /**
  * Hook to be called when a session starts (after system prompt is built).
  * Stores the prompt info for later retrieval when session completes.
@@ -91,6 +148,21 @@ export async function onSessionComplete(params: {
       toolCalls: params.toolCallCount,
       model: params.agentMeta?.model || "unknown",
       provider: params.agentMeta?.provider || "unknown",
+    });
+
+    // Log to reflexion system for learning
+    await logToReflexion({
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      success,
+      duration: params.meta.durationMs || 0,
+      tokens: usage.total || 0,
+      toolCalls: (params.toolErrors || []).map((e) => ({
+        tool: e.tool,
+        success: false,
+        error: e.error,
+      })),
+      model: params.agentMeta?.model,
     });
   } catch (err) {
     console.warn(`Failed to record session completion for ${params.sessionId}:`, err);

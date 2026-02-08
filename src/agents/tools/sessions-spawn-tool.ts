@@ -12,6 +12,7 @@ import {
 } from "../../routing/session-key.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.js";
 import { resolveAgentConfig } from "../agent-scope.js";
+import { selectAgentForTask } from "../evolution/dytopo-sessions-integration.js";
 import { AGENT_LANE_SUBAGENT } from "../lanes.js";
 import { optionalStringEnum } from "../schema/typebox.js";
 import { buildSubagentSystemPrompt } from "../subagent-announce.js";
@@ -23,6 +24,14 @@ import {
   resolveMainSessionAlias,
 } from "./sessions-helpers.js";
 
+/**
+ * Agent roles for multi-agent deliberation pattern.
+ * - executor: Default role, executes the task
+ * - critic: Devil's advocate, finds flaws and risks in proposed approaches
+ * - reviewer: Evaluates quality and completeness of work
+ */
+export type AgentRole = "executor" | "critic" | "reviewer";
+
 const SessionsSpawnToolSchema = Type.Object({
   task: Type.String(),
   label: Type.Optional(Type.String()),
@@ -33,7 +42,56 @@ const SessionsSpawnToolSchema = Type.Object({
   // Back-compat alias. Prefer runTimeoutSeconds.
   timeoutSeconds: Type.Optional(Type.Number({ minimum: 0 })),
   cleanup: optionalStringEnum(["delete", "keep"] as const),
+  /** Role for multi-agent deliberation. Affects the system prompt. */
+  role: optionalStringEnum(["executor", "critic", "reviewer"] as const),
 });
+
+/**
+ * Role-specific system prompt prefixes for multi-agent deliberation.
+ */
+const ROLE_PROMPTS: Record<AgentRole, string> = {
+  executor: "",
+  critic: `# Critical Evaluator Role
+
+Your role is to **critically evaluate and find flaws** in the proposed approach.
+
+## Your Mandate
+- Look for hidden assumptions, edge cases, and failure modes
+- Identify security vulnerabilities, race conditions, and scalability issues
+- Question whether the approach is the best one, or if alternatives exist
+- Be skeptical but constructive - provide specific concerns with reasoning
+- If you find no significant issues, explicitly state that
+
+## Output Format
+1. **Assessment**: Your overall verdict (approve/concerns/reject)
+2. **Issues Found**: List each concern with severity (critical/moderate/minor)
+3. **Recommendations**: Concrete suggestions to address issues
+4. **Blind Spots**: What might we be missing?
+
+---
+
+`,
+  reviewer: `# Quality Reviewer Role
+
+Your role is to **review the quality and completeness** of the work.
+
+## Your Mandate
+- Verify requirements are fully addressed
+- Check for consistency and correctness
+- Ensure edge cases are handled
+- Validate that the solution is maintainable and documented
+- Assess whether this is production-ready
+
+## Output Format
+1. **Completeness**: What percentage of requirements are met?
+2. **Quality Score**: Rate 1-10 with justification
+3. **Gaps**: What's missing or incomplete?
+4. **Suggestions**: Improvements for production readiness
+
+---
+
+`,
+};
 
 function splitModelRef(ref?: string) {
   if (!ref) {
@@ -142,9 +200,41 @@ export function createSessionsSpawnTool(opts?: {
       const requesterAgentId = normalizeAgentId(
         opts?.requesterAgentIdOverride ?? parseAgentSessionKey(requesterInternalKey)?.agentId,
       );
-      const targetAgentId = requestedAgentId
-        ? normalizeAgentId(requestedAgentId)
-        : requesterAgentId;
+
+      // Determine target agent using DyTopo if no explicit agentId provided
+      let targetAgentId: string;
+      let selectionReasoning: string;
+
+      if (requestedAgentId) {
+        // Explicit agent override - use directly
+        targetAgentId = normalizeAgentId(requestedAgentId);
+        selectionReasoning = "Explicit agentId provided in request";
+      } else {
+        // Use DyTopo for agent selection
+        try {
+          const allowAgents =
+            resolveAgentConfig(cfg, requesterAgentId)?.subagents?.allowAgents ?? [];
+          const availableAgents = allowAgents.includes("*") ? undefined : allowAgents;
+
+          const dyTopoSelection = selectAgentForTask(task, availableAgents);
+          targetAgentId = normalizeAgentId(dyTopoSelection.agentId);
+          selectionReasoning = `DyTopo selection (${(dyTopoSelection.confidence * 100).toFixed(0)}% confidence): ${dyTopoSelection.reasoning}`;
+
+          // Log the DyTopo selection for observability
+          console.log(`[sessions_spawn] DyTopo agent selection:`, {
+            task: task.slice(0, 100) + (task.length > 100 ? "..." : ""),
+            selectedAgent: targetAgentId,
+            confidence: dyTopoSelection.confidence,
+            reasoning: dyTopoSelection.reasoning,
+            availableAgents,
+          });
+        } catch (err) {
+          // Fallback to requester agent if DyTopo fails
+          targetAgentId = requesterAgentId;
+          selectionReasoning = `DyTopo failed (${err instanceof Error ? err.message : "unknown error"}), fallback to requester agent`;
+          console.warn(`[sessions_spawn] DyTopo selection failed, using fallback:`, err);
+        }
+      }
       if (targetAgentId !== requesterAgentId) {
         const allowAgents = resolveAgentConfig(cfg, requesterAgentId)?.subagents?.allowAgents ?? [];
         const allowAny = allowAgents.some((value) => value.trim() === "*");
@@ -215,7 +305,14 @@ export function createSessionsSpawnTool(opts?: {
           modelWarning = messageText;
         }
       }
-      const childSystemPrompt = buildSubagentSystemPrompt({
+      // Extract role for multi-agent deliberation
+      const role =
+        params.role === "executor" || params.role === "critic" || params.role === "reviewer"
+          ? (params.role as AgentRole)
+          : "executor";
+      const rolePromptPrefix = ROLE_PROMPTS[role];
+
+      const baseSystemPrompt = buildSubagentSystemPrompt({
         requesterSessionKey,
         requesterOrigin,
         childSessionKey,
@@ -223,6 +320,11 @@ export function createSessionsSpawnTool(opts?: {
         task,
         timeoutSeconds: runTimeoutSeconds > 0 ? runTimeoutSeconds : undefined,
       });
+
+      // Prepend role-specific prompt for critic/reviewer roles
+      const childSystemPrompt = rolePromptPrefix
+        ? rolePromptPrefix + baseSystemPrompt
+        : baseSystemPrompt;
 
       const childIdem = crypto.randomUUID();
       let childRunId: string = childIdem;
@@ -279,6 +381,11 @@ export function createSessionsSpawnTool(opts?: {
         runId: childRunId,
         modelApplied: resolvedModel ? modelApplied : undefined,
         warning: modelWarning,
+        role: role !== "executor" ? role : undefined,
+        agentSelection: {
+          selectedAgent: targetAgentId,
+          reasoning: selectionReasoning,
+        },
       });
     },
   };

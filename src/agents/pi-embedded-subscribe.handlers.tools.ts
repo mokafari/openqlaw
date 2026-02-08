@@ -1,6 +1,12 @@
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
+import {
+  logThought,
+  logAction,
+  logObservation,
+  inferThought,
+} from "./evolution/trajectory-logger.js";
 import { formatToolSuccess } from "./personality/formatter.js";
 import { normalizeTextForComparison } from "./pi-embedded-helpers.js";
 import { isMessagingTool, isMessagingToolSendAction } from "./pi-embedded-messaging.js";
@@ -73,6 +79,15 @@ export async function handleToolExecutionStart(
   ctx.log.debug(
     `embedded run tool start: runId=${ctx.params.runId} tool=${toolName} toolCallId=${toolCallId}`,
   );
+
+  // ── ReAct Trajectory Logging ──
+  // Log thought before action (infer reasoning from tool/args if not explicitly provided)
+  const sessionId = ctx.params.sessionKey ?? ctx.params.runId;
+  const runId = ctx.params.runId;
+  const argsRecord = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const thought = inferThought(toolName, argsRecord);
+  logThought(sessionId, runId, toolName, thought, toolCallId);
+  logAction(sessionId, runId, toolName, toolCallId, argsRecord, meta);
 
   const shouldEmitToolEvents = ctx.shouldEmitToolResult();
   emitAgentEvent({
@@ -231,6 +246,14 @@ export function handleToolExecutionEnd(
   ctx.log.debug(
     `embedded run tool end: runId=${ctx.params.runId} tool=${toolName} toolCallId=${toolCallId}`,
   );
+
+  // ── ReAct Trajectory Logging ──
+  // Log observation after tool result
+  const sessionId = ctx.params.sessionKey ?? ctx.params.runId;
+  const runId = ctx.params.runId;
+  const resultText =
+    extractToolResultText(sanitizedResult) ?? (isToolError ? "Error occurred" : "Success");
+  logObservation(sessionId, runId, toolName, toolCallId, resultText, !isToolError);
 
   // Emit tool success message with synonym formatting when available
   if (ctx.params.onToolResult && ctx.shouldEmitToolResult() && !isToolError) {
