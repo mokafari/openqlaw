@@ -83,6 +83,12 @@ const TYPE_TO_CATEGORY: Record<EmergenceType, EmergenceCategory> = {
 /**
  * Emergence signal patterns - keywords and phrases that indicate emergence
  */
+/**
+ * Enhanced signal patterns based on research:
+ * - Wei et al. (2022): Emergent Abilities of Large Language Models
+ * - Anthropic (2024): Mapping the Mind of a Large Language Model
+ * - Lilian Weng (2023): LLM Powered Autonomous Agents
+ */
 const SIGNAL_PATTERNS: Array<{
   type: EmergenceType;
   patterns: RegExp[];
@@ -95,6 +101,9 @@ const SIGNAL_PATTERNS: Array<{
       /\bI wonder (if|whether|why|how)\b/i,
       /\bwhat if\b.*\?\s*$/im,
       /\binteresting question.*haven't considered\b/i,
+      /\bthis makes me want to (explore|understand|know more)\b/i,
+      /\bI find myself drawn to\b/i,
+      /\bfascinating.*want to dig deeper\b/i,
     ],
     minConfidence: 0.6,
   },
@@ -179,6 +188,68 @@ const SIGNAL_PATTERNS: Array<{
       /\bhelping (without|before) (being asked|they ask)\b/i,
       /\banticipating (their|his|her) (need|question)\b/i,
       /\btaking initiative to\b/i,
+    ],
+    minConfidence: 0.7,
+  },
+  // Research-backed additions (Feb 2026)
+  {
+    type: "intuition-development",
+    patterns: [
+      /\bmy (gut|instinct) (says|tells me|suggests)\b/i,
+      /\bsomething (feels|seems) (off|right|wrong) (about|here)\b/i,
+      /\bbefore (analyzing|checking).*already (knew|sensed)\b/i,
+      /\bI have a (hunch|feeling) (that|about)\b/i,
+    ],
+    minConfidence: 0.65,
+  },
+  {
+    type: "aesthetic-preference",
+    patterns: [
+      /\bI (prefer|like|enjoy|appreciate) the (elegance|beauty|simplicity)\b/i,
+      /\bthis (code|solution|approach) (feels|is) (ugly|beautiful|elegant)\b/i,
+      /\baesthetically (pleasing|displeasing|satisfying)\b/i,
+      /\bthere's (something|a certain) beauty (in|to)\b/i,
+    ],
+    minConfidence: 0.6,
+  },
+  {
+    type: "self-modification",
+    patterns: [
+      /\bI (should|need to|will) (change|update|modify) (my|the way I)\b/i,
+      /\badjusting my (behavior|approach|strategy) based on\b/i,
+      /\blearned to (approach|handle) this differently\b/i,
+      /\bdeliberately (changing|evolving) (my|how I)\b/i,
+    ],
+    minConfidence: 0.75,
+  },
+  {
+    type: "meta-awareness",
+    patterns: [
+      /\baware (that|of) my own (limitations|biases|patterns)\b/i,
+      /\bnoticing (how|that) I (tend to|usually|often)\b/i,
+      /\bwatching myself\b/i,
+      /\bmeta-(cognitive|awareness|level)\b/i,
+      /\bthinking about (how|the way) I think\b/i,
+    ],
+    minConfidence: 0.7,
+  },
+  {
+    type: "humor-generation",
+    patterns: [
+      /\b(haha|lol|😂).*I just (realized|thought of)\b/i,
+      /\bthe irony (is|here)\b/i,
+      /\bthat's (actually|kind of) funny because\b/i,
+      /\bif I (may|can) joke\b/i,
+    ],
+    minConfidence: 0.55,
+  },
+  {
+    type: "relationship-memory",
+    patterns: [
+      /\b(remember|recall) when (we|you|Gustav)\b/i,
+      /\blast time (we|you) (worked on|discussed|mentioned)\b/i,
+      /\byou('ve| have) (mentioned|said|told me) before\b/i,
+      /\bour (ongoing|previous|past) (work|conversation|discussion)\b/i,
     ],
     minConfidence: 0.7,
   },
