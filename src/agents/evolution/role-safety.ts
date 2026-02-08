@@ -476,6 +476,42 @@ export class RoleBasedSafetySystem {
         ),
     };
   }
+
+  /**
+   * Get a role by name (for research-integration compatibility)
+   */
+  getRole(roleName?: string): AgentRole {
+    if (roleName) {
+      const role = this.roles.get(roleName);
+      if (role) return role;
+    }
+    return this.currentRole;
+  }
+
+  /**
+   * Validate tool usage for a specific role (for research-integration compatibility)
+   */
+  validateToolUsage(
+    roleName: string,
+    toolName: string,
+    parameters: any,
+    context: TaskContext,
+  ): ValidationResult {
+    const role = this.roles.get(roleName);
+    if (!role) {
+      return { allowed: false, reason: `Unknown role: ${roleName}` };
+    }
+
+    // Temporarily switch to the role for validation
+    const prevRole = this.currentRole;
+    this.currentRole = role;
+
+    const result = this.validateAction({ tool: toolName, parameters }, context);
+
+    // Restore previous role
+    this.currentRole = prevRole;
+    return result;
+  }
 }
 
 /**
