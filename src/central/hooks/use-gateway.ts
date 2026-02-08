@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { CentralClient } from "../client.js";
-import type { DashboardAction, SessionSummary } from "../types.js";
+import type { DashboardAction } from "../types.js";
 import { useInterval } from "./use-interval.js";
 
 type UseGatewayOptions = {
@@ -54,7 +54,7 @@ export function useGateway({ client, dispatch }: UseGatewayOptions) {
       if (sessionsResult?.sessions) {
         dispatchRef.current({
           type: "SET_SESSIONS",
-          sessions: sessionsResult.sessions as SessionSummary[],
+          sessions: sessionsResult.sessions,
         });
       }
       if (health) {
@@ -73,7 +73,7 @@ export function useGateway({ client, dispatch }: UseGatewayOptions) {
         if (res?.sessions) {
           dispatchRef.current({
             type: "SET_SESSIONS",
-            sessions: res.sessions as SessionSummary[],
+            sessions: res.sessions,
           });
         }
       })

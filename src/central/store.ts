@@ -1,12 +1,6 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import type { AgentSummary, PresenceEntry } from "../gateway/protocol/index.js";
-import type {
-  AgentInfo,
-  DashboardAction,
-  DashboardState,
-  HealthSummary,
-  SessionSummary,
-} from "./types.js";
+import type { AgentInfo, DashboardAction, DashboardState, HealthSummary } from "./types.js";
 import { formatGatewayEvent } from "./formatters/event-format.js";
 import { MAX_ACTIVITY_ENTRIES } from "./types.js";
 
