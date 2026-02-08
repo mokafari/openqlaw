@@ -1,8 +1,15 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import type { AgentSummary, PresenceEntry } from "../gateway/protocol/index.js";
-import type { AgentInfo, DashboardAction, DashboardState, HealthSummary } from "./types.js";
+import type {
+  AgentInfo,
+  DashboardAction,
+  DashboardState,
+  HealthSummary,
+  RunInfo,
+  ToolCall,
+} from "./types.js";
 import { formatGatewayEvent } from "./formatters/event-format.js";
-import { MAX_ACTIVITY_ENTRIES } from "./types.js";
+import { MAX_ACTIVITY_ENTRIES, MAX_RUNS } from "./types.js";
 
 // ── Initial state ────────────────────────────────────────────────────
 export const initialState: DashboardState = {
@@ -11,17 +18,15 @@ export const initialState: DashboardState = {
   uptimeMs: 0,
   agents: [],
   sessions: [],
+  runs: [],
   activityFeed: [],
   presence: [],
   health: null,
-  focusedPanel: "agents",
-  selectedAgentIndex: 0,
-  selectedSessionIndex: 0,
-  sessionDrillKey: null,
-  activityScrollOffset: 0,
-  activitySelectedIndex: 0,
-  expandedActivityIndex: null,
-  sessionScrollOffset: 0,
+  focusedPanel: "runs",
+  runsSelectedIndex: 0,
+  logSelectedIndex: 0,
+  logExpandedIndex: null,
+  detailRunId: null,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -33,10 +38,7 @@ function mergeAgents(existing: AgentInfo[], incoming: AgentSummary[]): AgentInfo
   const byId = new Map(existing.map((a) => [a.id, a]));
   return incoming.map((a) => {
     const prev = byId.get(a.id);
-    if (prev) {
-      return { ...prev, ...a };
-    }
-    return toAgentInfo(a);
+    return prev ? { ...prev, ...a } : toAgentInfo(a);
   });
 }
 
@@ -45,10 +47,121 @@ function pushActivity(
   entry: import("./types.js").ActivityEntry,
 ): import("./types.js").ActivityEntry[] {
   const next = [...feed, entry];
-  if (next.length > MAX_ACTIVITY_ENTRIES) {
-    return next.slice(next.length - MAX_ACTIVITY_ENTRIES);
+  return next.length > MAX_ACTIVITY_ENTRIES ? next.slice(next.length - MAX_ACTIVITY_ENTRIES) : next;
+}
+
+function agentFromSession(sessionKey: string): string {
+  const colon = sessionKey.indexOf(":");
+  return colon > 0 ? sessionKey.slice(0, colon) : sessionKey;
+}
+
+// ── Run tracking from agent events ───────────────────────────────────
+function processAgentEventForRuns(
+  runs: RunInfo[],
+  agents: AgentInfo[],
+  payload: Record<string, unknown>,
+): { runs: RunInfo[]; agents: AgentInfo[] } {
+  const stream = typeof payload.stream === "string" ? payload.stream : "";
+  const data =
+    typeof payload.data === "object" && payload.data
+      ? (payload.data as Record<string, unknown>)
+      : {};
+  const phase = typeof data.phase === "string" ? data.phase : "";
+  const runId = typeof payload.runId === "string" ? payload.runId : "";
+  const sessionKey = typeof payload.sessionKey === "string" ? payload.sessionKey : "";
+
+  if (!runId) {
+    return { runs, agents };
   }
-  return next;
+
+  const agentId = agentFromSession(sessionKey);
+
+  // Lifecycle: start
+  if (stream === "lifecycle" && phase === "start") {
+    const existing = runs.find((r) => r.runId === runId);
+    if (!existing) {
+      const startedAt = typeof data.startedAt === "number" ? data.startedAt : Date.now();
+      const newRun: RunInfo = {
+        runId,
+        sessionKey,
+        agentId,
+        status: "running",
+        startedAt,
+        tools: [],
+        lastResponse: "",
+      };
+      const newRuns = [newRun, ...runs].slice(0, MAX_RUNS);
+      const newAgents = agents.map((a) =>
+        a.id === agentId ? { ...a, activeRuns: a.activeRuns + 1, lastActivityTs: Date.now() } : a,
+      );
+      return { runs: newRuns, agents: newAgents };
+    }
+    return { runs, agents };
+  }
+
+  // Lifecycle: end
+  if (stream === "lifecycle" && (phase === "end" || phase === "error")) {
+    const newRuns = runs.map((r) => {
+      if (r.runId !== runId) {
+        return r;
+      }
+      const endedAt = typeof data.endedAt === "number" ? data.endedAt : Date.now();
+      const errorMessage =
+        phase === "error" && typeof data.error === "string" ? data.error : undefined;
+      return {
+        ...r,
+        status: (phase === "error" ? "error" : "completed") as RunInfo["status"],
+        endedAt,
+        errorMessage: errorMessage ?? r.errorMessage,
+      };
+    });
+    const newAgents = agents.map((a) =>
+      a.id === agentId
+        ? { ...a, activeRuns: Math.max(0, a.activeRuns - 1), lastActivityTs: Date.now() }
+        : a,
+    );
+    return { runs: newRuns, agents: newAgents };
+  }
+
+  // Tool: start
+  if (stream === "tool" && phase === "start") {
+    const toolCallId = typeof data.toolCallId === "string" ? data.toolCallId : "";
+    const name = typeof data.name === "string" ? data.name : "?";
+    const args =
+      typeof data.args === "object" && data.args ? (data.args as Record<string, unknown>) : {};
+    const tool: ToolCall = { toolCallId, name, args, startedAt: Date.now() };
+    const newRuns = runs.map((r) => (r.runId === runId ? { ...r, tools: [...r.tools, tool] } : r));
+    return { runs: newRuns, agents };
+  }
+
+  // Tool: result
+  if (stream === "tool" && phase === "result") {
+    const toolCallId = typeof data.toolCallId === "string" ? data.toolCallId : "";
+    const isError = data.isError === true;
+    const result = data.result;
+    const meta = typeof data.meta === "string" ? data.meta : undefined;
+    const newRuns = runs.map((r) => {
+      if (r.runId !== runId) {
+        return r;
+      }
+      const tools = r.tools.map((t) =>
+        t.toolCallId === toolCallId ? { ...t, endedAt: Date.now(), isError, result, meta } : t,
+      );
+      return { ...r, tools };
+    });
+    return { runs: newRuns, agents };
+  }
+
+  // Assistant: accumulate final text (only if we get a final assistant event)
+  if (stream === "assistant") {
+    const text = typeof data.text === "string" ? data.text : "";
+    if (text) {
+      const newRuns = runs.map((r) => (r.runId === runId ? { ...r, lastResponse: text } : r));
+      return { runs: newRuns, agents };
+    }
+  }
+
+  return { runs, agents };
 }
 
 // ── Reducer ──────────────────────────────────────────────────────────
@@ -78,24 +191,6 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
     case "SET_PRESENCE":
       return { ...state, presence: action.presence };
 
-    case "AGENT_RUN_START": {
-      const agents = state.agents.map((a) =>
-        a.id === action.agentId
-          ? { ...a, activeRuns: a.activeRuns + 1, lastActivityTs: Date.now() }
-          : a,
-      );
-      return { ...state, agents };
-    }
-
-    case "AGENT_RUN_END": {
-      const agents = state.agents.map((a) =>
-        a.id === action.agentId
-          ? { ...a, activeRuns: Math.max(0, a.activeRuns - 1), lastActivityTs: Date.now() }
-          : a,
-      );
-      return { ...state, agents };
-    }
-
     case "ADD_ACTIVITY":
       return { ...state, activityFeed: pushActivity(state.activityFeed, action.entry) };
 
@@ -103,9 +198,8 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       return {
         ...state,
         activityFeed: [],
-        activityScrollOffset: 0,
-        activitySelectedIndex: 0,
-        expandedActivityIndex: null,
+        logSelectedIndex: 0,
+        logExpandedIndex: null,
       };
 
     case "TICK":
@@ -114,34 +208,25 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
     case "FOCUS_PANEL":
       return { ...state, focusedPanel: action.panel };
 
-    case "SELECT_AGENT":
-      return { ...state, selectedAgentIndex: action.index };
+    case "RUNS_SELECT":
+      return { ...state, runsSelectedIndex: action.index };
 
-    case "SELECT_SESSION":
-      return { ...state, selectedSessionIndex: action.index };
+    case "LOG_SELECT":
+      return { ...state, logSelectedIndex: action.index };
 
-    case "DRILL_SESSION":
-      return { ...state, sessionDrillKey: action.key };
-
-    case "SCROLL_ACTIVITY":
-      return { ...state, activityScrollOffset: action.offset };
-
-    case "SELECT_ACTIVITY":
-      return { ...state, activitySelectedIndex: action.index };
-
-    case "TOGGLE_EXPAND_ACTIVITY": {
-      const isExpanded = state.expandedActivityIndex === action.index;
-      return { ...state, expandedActivityIndex: isExpanded ? null : action.index };
+    case "LOG_TOGGLE_EXPAND": {
+      const isExpanded = state.logExpandedIndex === action.index;
+      return { ...state, logExpandedIndex: isExpanded ? null : action.index };
     }
 
-    case "SCROLL_SESSION":
-      return { ...state, sessionScrollOffset: action.offset };
+    case "DETAIL_RUN":
+      return { ...state, detailRunId: action.runId };
 
     case "GATEWAY_EVENT": {
       const evt = action.event;
       let next = state;
 
-      // Dispatch presence/health events into state
+      // Presence/health
       if (evt.event === "presence") {
         const payload = evt.payload as { presence?: PresenceEntry[] } | undefined;
         if (Array.isArray(payload?.presence)) {
@@ -154,52 +239,26 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
         }
       }
 
-      // Track agent run lifecycle
+      // Run tracking from agent events
       if (evt.event === "agent") {
         const payload = evt.payload as Record<string, unknown> | undefined;
         if (payload) {
-          const data =
-            typeof payload.data === "object" && payload.data
-              ? (payload.data as Record<string, unknown>)
-              : {};
-          const stream = typeof payload.stream === "string" ? payload.stream : "";
-          const sessionKey = typeof payload.sessionKey === "string" ? payload.sessionKey : "";
-          const agentId = sessionKey.includes(":") ? sessionKey.split(":")[0] : sessionKey;
-          const runId = typeof payload.runId === "string" ? payload.runId : undefined;
-
-          if (agentId && runId && stream === "lifecycle") {
-            const phase = data.phase;
-            if (phase === "start") {
-              const agents = next.agents.map((a) =>
-                a.id === agentId
-                  ? { ...a, activeRuns: a.activeRuns + 1, lastActivityTs: Date.now() }
-                  : a,
-              );
-              next = { ...next, agents };
-            } else if (phase === "end" || phase === "error") {
-              const agents = next.agents.map((a) =>
-                a.id === agentId
-                  ? { ...a, activeRuns: Math.max(0, a.activeRuns - 1), lastActivityTs: Date.now() }
-                  : a,
-              );
-              next = { ...next, agents };
-            }
-          }
+          const result = processAgentEventForRuns(next.runs, next.agents, payload);
+          next = { ...next, runs: result.runs, agents: result.agents };
         }
       }
 
-      // Add to activity feed (skip noisy tick events)
-      if (evt.event !== "tick") {
-        const entry = formatGatewayEvent(evt);
+      // Filtered activity feed
+      const entry = formatGatewayEvent(evt);
+      if (entry) {
         const newFeed = pushActivity(next.activityFeed, entry);
-        // Auto-follow: if user was at the latest entry, keep them there
+        // Auto-follow: if user was at the latest, keep them there
         const wasAtEnd =
-          next.activitySelectedIndex >= next.activityFeed.length - 1 ||
-          next.activityFeed.length === 0;
+          next.logSelectedIndex >= next.activityFeed.length - 1 || next.activityFeed.length === 0;
         next = {
           ...next,
           activityFeed: newFeed,
-          activitySelectedIndex: wasAtEnd ? newFeed.length - 1 : next.activitySelectedIndex,
+          logSelectedIndex: wasAtEnd ? newFeed.length - 1 : next.logSelectedIndex,
         };
       }
 

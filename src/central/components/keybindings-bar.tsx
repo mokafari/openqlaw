@@ -10,10 +10,12 @@ type KeybindingsBarProps = {
 type Binding = { key: string; label: string; panel?: PanelId };
 
 const BINDINGS: Binding[] = [
-  { key: "1", label: "Agents", panel: "agents" },
-  { key: "2", label: "Activity", panel: "activity" },
-  { key: "3", label: "Session", panel: "session" },
+  { key: "1", label: "Runs", panel: "runs" },
+  { key: "2", label: "Log", panel: "log" },
+  { key: "3", label: "Detail", panel: "detail" },
   { key: "Tab", label: "Cycle" },
+  { key: "j/k", label: "Nav" },
+  { key: "Enter", label: "Expand" },
   { key: "r", label: "Refresh" },
   { key: "q", label: "Quit" },
 ];

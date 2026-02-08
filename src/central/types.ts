@@ -6,7 +6,7 @@ import type {
 } from "../gateway/protocol/index.js";
 
 // ── Panel focus ──────────────────────────────────────────────────────
-export type PanelId = "agents" | "activity" | "session";
+export type PanelId = "runs" | "log" | "detail";
 
 // ── Agent info enriched with live run data ───────────────────────────
 export type AgentInfo = AgentSummary & {
@@ -26,25 +26,51 @@ export type SessionSummary = {
   displayName?: string;
 };
 
-// ── Activity feed entry ──────────────────────────────────────────────
+// ── Per-run tracking ─────────────────────────────────────────────────
+export type RunStatus = "running" | "completed" | "error";
+
+export type ToolCall = {
+  toolCallId: string;
+  name: string;
+  args: Record<string, unknown>;
+  startedAt: number;
+  endedAt?: number;
+  isError?: boolean;
+  result?: unknown;
+  meta?: string;
+};
+
+export type RunInfo = {
+  runId: string;
+  sessionKey: string;
+  agentId: string;
+  status: RunStatus;
+  startedAt: number;
+  endedAt?: number;
+  tools: ToolCall[];
+  /** Last assistant text (final, not delta). */
+  lastResponse: string;
+  errorMessage?: string;
+};
+
+// ── Activity feed entry (filtered — no deltas/debug) ────────────────
 export type ActivityKind =
+  | "lifecycle_start"
+  | "lifecycle_end"
   | "tool_start"
   | "tool_result"
-  | "assistant"
-  | "lifecycle"
+  | "chat_final"
   | "error"
-  | "state_change"
-  | "info";
+  | "system";
 
 export type ActivityEntry = {
   ts: number;
   agentId: string;
   kind: ActivityKind;
   summary: string;
+  runId?: string;
   /** Raw event payload for drill-in inspection. */
   payload: Record<string, unknown>;
-  /** Gateway event name (e.g. "agent", "chat", "health"). */
-  eventName: string;
 };
 
 // ── Health summary (loose shape — gateway returns opaque payload) ────
@@ -57,18 +83,19 @@ export type DashboardState = {
   uptimeMs: number;
   agents: AgentInfo[];
   sessions: SessionSummary[];
+  /** Runs indexed by runId — most recent first in the list view. */
+  runs: RunInfo[];
+  /** Filtered event log (no deltas/debug). */
   activityFeed: ActivityEntry[];
   presence: PresenceEntry[];
   health: HealthSummary | null;
   // UI
   focusedPanel: PanelId;
-  selectedAgentIndex: number;
-  selectedSessionIndex: number;
-  sessionDrillKey: string | null;
-  activityScrollOffset: number;
-  activitySelectedIndex: number;
-  expandedActivityIndex: number | null;
-  sessionScrollOffset: number;
+  runsSelectedIndex: number;
+  logSelectedIndex: number;
+  logExpandedIndex: number | null;
+  /** Which run detail to show in the detail panel (null = last selected). */
+  detailRunId: string | null;
 };
 
 // ── Reducer actions ──────────────────────────────────────────────────
@@ -79,23 +106,19 @@ export type DashboardAction =
   | { type: "SET_SESSIONS"; sessions: SessionSummary[] }
   | { type: "SET_HEALTH"; health: HealthSummary }
   | { type: "SET_PRESENCE"; presence: PresenceEntry[] }
-  | { type: "AGENT_RUN_START"; agentId: string; runId: string }
-  | { type: "AGENT_RUN_END"; agentId: string; runId: string }
   | { type: "ADD_ACTIVITY"; entry: ActivityEntry }
   | { type: "CLEAR_ACTIVITY" }
   | { type: "TICK"; uptimeMs: number }
   | { type: "FOCUS_PANEL"; panel: PanelId }
-  | { type: "SELECT_AGENT"; index: number }
-  | { type: "SELECT_SESSION"; index: number }
-  | { type: "DRILL_SESSION"; key: string | null }
-  | { type: "SCROLL_ACTIVITY"; offset: number }
-  | { type: "SELECT_ACTIVITY"; index: number }
-  | { type: "TOGGLE_EXPAND_ACTIVITY"; index: number }
-  | { type: "SCROLL_SESSION"; offset: number }
+  | { type: "RUNS_SELECT"; index: number }
+  | { type: "LOG_SELECT"; index: number }
+  | { type: "LOG_TOGGLE_EXPAND"; index: number }
+  | { type: "DETAIL_RUN"; runId: string | null }
   | { type: "GATEWAY_EVENT"; event: EventFrame };
 
-// ── Max entries for the activity ring buffer ─────────────────────────
+// ── Max entries ──────────────────────────────────────────────────────
 export const MAX_ACTIVITY_ENTRIES = 500;
+export const MAX_RUNS = 100;
 
 // ── Client options (mirrors CLI flags) ───────────────────────────────
 export type CentralClientOptions = {

@@ -381,6 +381,19 @@ export async function deliverOutboundPayloads(params: {
       if (payload.text) {
         echoDetector.recordOutgoing(payload.text, to);
       }
+      // Also record media placeholders to catch audio/image echo messages
+      // The monitor uses placeholders like <media:audio> for attachment-only messages
+      if (payload.mediaUrl || (payload.mediaUrls && payload.mediaUrls.length > 0)) {
+        const urls = payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
+        for (const url of urls) {
+          const ext = url.split(".").pop()?.toLowerCase() ?? "";
+          const isAudio = ["mp3", "m4a", "wav", "ogg", "aac", "caf"].includes(ext);
+          const isImage = ["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(ext);
+          const isVideo = ["mp4", "mov", "avi", "mkv"].includes(ext);
+          const kind = isAudio ? "audio" : isImage ? "image" : isVideo ? "video" : "attachment";
+          echoDetector.recordOutgoing(`<media:${kind}>`, to);
+        }
+      }
     }
   }
 

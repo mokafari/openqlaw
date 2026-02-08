@@ -15,35 +15,16 @@ function formatUptime(ms: number): string {
 
 export function StatusBar() {
   const { state } = useDashboard();
-  const { connected, uptimeMs, presence, health } = state;
+  const { connected, uptimeMs, presence, runs, activityFeed } = state;
 
   const statusDot = connected ? "●" : "○";
   const statusColor = connected ? LOBSTER_PALETTE.success : LOBSTER_PALETTE.error;
   const statusText = connected ? "connected" : "disconnected";
   const nodeCount = presence.length;
-
-  // Extract channel health from the health payload (best-effort)
-  const channels = (() => {
-    if (!health || typeof health !== "object") {
-      return "";
-    }
-    const ch = (health as Record<string, unknown>).channels;
-    if (!Array.isArray(ch)) {
-      return "";
-    }
-    return ch
-      .map((c: unknown) => {
-        if (typeof c !== "object" || !c) {
-          return null;
-        }
-        const entry = c as Record<string, unknown>;
-        const name = typeof entry.name === "string" ? entry.name : "?";
-        const ok = entry.connected === true || entry.healthy === true;
-        return `${name}${ok ? "✓" : "✗"}`;
-      })
-      .filter(Boolean)
-      .join(" ");
-  })();
+  const activeRuns = runs.filter((r) => r.status === "running").length;
+  const errorRuns = runs.filter((r) => r.status === "error").length;
+  const totalTools = runs.reduce((sum, r) => sum + r.tools.length, 0);
+  const failedTools = runs.reduce((sum, r) => sum + r.tools.filter((t) => t.isError).length, 0);
 
   return (
     <Box>
@@ -56,12 +37,22 @@ export function StatusBar() {
       <Text>
         {nodeCount} node{nodeCount !== 1 ? "s" : ""}
       </Text>
-      {channels ? (
+      <Text color={LOBSTER_PALETTE.muted}> | </Text>
+      <Text color={activeRuns > 0 ? LOBSTER_PALETTE.accent : undefined}>
+        {activeRuns} active run{activeRuns !== 1 ? "s" : ""}
+      </Text>
+      {errorRuns > 0 && (
         <>
           <Text color={LOBSTER_PALETTE.muted}> | </Text>
-          <Text>{channels}</Text>
+          <Text color={LOBSTER_PALETTE.error}>{errorRuns} errors</Text>
         </>
-      ) : null}
+      )}
+      <Text color={LOBSTER_PALETTE.muted}> | </Text>
+      <Text>
+        {totalTools} tools{failedTools > 0 ? ` (${failedTools} failed)` : ""}
+      </Text>
+      <Text color={LOBSTER_PALETTE.muted}> | </Text>
+      <Text dimColor>{activityFeed.length} events</Text>
     </Box>
   );
 }

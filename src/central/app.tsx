@@ -7,11 +7,11 @@ import { PanelFrame } from "./components/panel-frame.js";
 import { StatusBar } from "./components/status-bar.js";
 import { useGateway } from "./hooks/use-gateway.js";
 import { ActivityPanel } from "./panels/activity-panel.js";
-import { AgentsPanel } from "./panels/agents-panel.js";
-import { SessionPanel } from "./panels/session-panel.js";
+import { DetailPanel } from "./panels/detail-panel.js";
+import { RunsPanel } from "./panels/runs-panel.js";
 import { DashboardContext, useDashboardReducer } from "./store.js";
 
-const PANEL_CYCLE: PanelId[] = ["agents", "activity", "session"];
+const PANEL_CYCLE: PanelId[] = ["runs", "log", "detail"];
 
 type AppProps = {
   client: CentralClient;
@@ -26,9 +26,22 @@ function Dashboard({ client }: AppProps) {
 
   const cyclePanel = useCallback(() => {
     const idx = PANEL_CYCLE.indexOf(state.focusedPanel);
-    const next = PANEL_CYCLE[(idx + 1) % PANEL_CYCLE.length] ?? "agents";
+    const next = PANEL_CYCLE[(idx + 1) % PANEL_CYCLE.length] ?? "runs";
     dispatch({ type: "FOCUS_PANEL", panel: next });
   }, [state.focusedPanel, dispatch]);
+
+  // Count total flat run entries for bounds checking
+  const totalRunEntries = (() => {
+    const agentIds = new Set(state.agents.map((a) => a.id));
+    for (const run of state.runs) {
+      agentIds.add(run.agentId);
+    }
+    let count = 0;
+    for (const agentId of agentIds) {
+      count += state.runs.filter((r) => r.agentId === agentId).length;
+    }
+    return count;
+  })();
 
   useInput((input, key) => {
     // Global keys
@@ -37,15 +50,15 @@ function Dashboard({ client }: AppProps) {
       return;
     }
     if (input === "1") {
-      dispatch({ type: "FOCUS_PANEL", panel: "agents" });
+      dispatch({ type: "FOCUS_PANEL", panel: "runs" });
       return;
     }
     if (input === "2") {
-      dispatch({ type: "FOCUS_PANEL", panel: "activity" });
+      dispatch({ type: "FOCUS_PANEL", panel: "log" });
       return;
     }
     if (input === "3") {
-      dispatch({ type: "FOCUS_PANEL", panel: "session" });
+      dispatch({ type: "FOCUS_PANEL", panel: "detail" });
       return;
     }
     if (key.tab) {
@@ -57,91 +70,86 @@ function Dashboard({ client }: AppProps) {
       return;
     }
 
-    // Panel-specific keys
-    if (state.focusedPanel === "agents") {
+    // ── Runs panel ───────────────────────────────────────────────
+    if (state.focusedPanel === "runs") {
       if (key.upArrow || input === "k") {
         dispatch({
-          type: "SELECT_AGENT",
-          index: Math.max(0, state.selectedAgentIndex - 1),
+          type: "RUNS_SELECT",
+          index: Math.max(0, state.runsSelectedIndex - 1),
         });
       } else if (key.downArrow || input === "j") {
         dispatch({
-          type: "SELECT_AGENT",
-          index: Math.min(state.agents.length - 1, state.selectedAgentIndex + 1),
+          type: "RUNS_SELECT",
+          index: Math.min(Math.max(0, totalRunEntries - 1), state.runsSelectedIndex + 1),
         });
       } else if (key.return) {
-        const agent = state.agents[state.selectedAgentIndex];
-        if (agent) {
-          dispatch({ type: "FOCUS_PANEL", panel: "session" });
-        }
+        // Open detail for selected run
+        dispatch({ type: "FOCUS_PANEL", panel: "detail" });
       }
-    } else if (state.focusedPanel === "activity") {
+    }
+
+    // ── Log panel ────────────────────────────────────────────────
+    if (state.focusedPanel === "log") {
       if (key.upArrow || input === "k") {
-        const newIndex = Math.max(0, state.activitySelectedIndex - 1);
-        dispatch({ type: "SELECT_ACTIVITY", index: newIndex });
+        dispatch({
+          type: "LOG_SELECT",
+          index: Math.max(0, state.logSelectedIndex - 1),
+        });
       } else if (key.downArrow || input === "j") {
-        const newIndex = Math.min(state.activityFeed.length - 1, state.activitySelectedIndex + 1);
-        dispatch({ type: "SELECT_ACTIVITY", index: newIndex });
+        dispatch({
+          type: "LOG_SELECT",
+          index: Math.min(state.activityFeed.length - 1, state.logSelectedIndex + 1),
+        });
       } else if (key.return) {
-        // Toggle expand on the selected entry
-        dispatch({ type: "TOGGLE_EXPAND_ACTIVITY", index: state.activitySelectedIndex });
+        dispatch({ type: "LOG_TOGGLE_EXPAND", index: state.logSelectedIndex });
       } else if (key.escape) {
-        // Collapse any expanded entry
-        dispatch({ type: "TOGGLE_EXPAND_ACTIVITY", index: state.expandedActivityIndex ?? -1 });
+        if (state.logExpandedIndex !== null) {
+          dispatch({ type: "LOG_TOGGLE_EXPAND", index: state.logExpandedIndex });
+        }
       } else if (input === "g") {
-        dispatch({ type: "SELECT_ACTIVITY", index: 0 });
-        dispatch({ type: "SCROLL_ACTIVITY", offset: 0 });
+        dispatch({ type: "LOG_SELECT", index: 0 });
       } else if (input === "G") {
-        const lastIndex = Math.max(0, state.activityFeed.length - 1);
-        dispatch({ type: "SELECT_ACTIVITY", index: lastIndex });
+        dispatch({ type: "LOG_SELECT", index: Math.max(0, state.activityFeed.length - 1) });
       } else if (input === "c") {
         dispatch({ type: "CLEAR_ACTIVITY" });
       }
-    } else if (state.focusedPanel === "session") {
+    }
+
+    // ── Detail panel ─────────────────────────────────────────────
+    if (state.focusedPanel === "detail") {
       if (key.escape) {
-        dispatch({ type: "DRILL_SESSION", key: null });
-      } else if (key.upArrow || input === "k") {
-        dispatch({
-          type: "SELECT_SESSION",
-          index: Math.max(0, state.selectedSessionIndex - 1),
-        });
-      } else if (key.downArrow || input === "j") {
-        dispatch({
-          type: "SELECT_SESSION",
-          index: Math.min(state.sessions.length - 1, state.selectedSessionIndex + 1),
-        });
-      } else if (key.return) {
-        const session = state.sessions[state.selectedSessionIndex];
-        if (session) {
-          dispatch({ type: "DRILL_SESSION", key: session.key });
-        }
+        dispatch({ type: "DETAIL_RUN", runId: null });
+        dispatch({ type: "FOCUS_PANEL", panel: "runs" });
       }
     }
   });
 
-  // Right panel: Activity by default, Session when focused
-  const rightPanel =
-    state.focusedPanel === "session" ? (
-      <PanelFrame title="Sessions" focused>
-        <SessionPanel />
-      </PanelFrame>
-    ) : (
-      <PanelFrame title="Activity" focused={state.focusedPanel === "activity"}>
-        <ActivityPanel />
-      </PanelFrame>
-    );
+  // Layout: top row (runs + log), bottom row (detail), status bar
+  const topHeight = Math.max(8, Math.floor((rows - 3) * 0.6));
+  const bottomHeight = Math.max(4, rows - 3 - topHeight);
 
   return (
     <DashboardContext.Provider value={{ state, dispatch }}>
       <Box flexDirection="column" height={rows}>
         <KeybindingsBar focusedPanel={state.focusedPanel} />
-        <Box flexDirection="row" flexGrow={1}>
-          <Box width="40%">
-            <PanelFrame title="Agents" focused={state.focusedPanel === "agents"}>
-              <AgentsPanel />
+        {/* Top row: Runs + Event Log */}
+        <Box flexDirection="row" height={topHeight}>
+          <Box width="35%">
+            <PanelFrame title="Runs" focused={state.focusedPanel === "runs"}>
+              <RunsPanel />
             </PanelFrame>
           </Box>
-          <Box width="60%">{rightPanel}</Box>
+          <Box width="65%">
+            <PanelFrame title="Event Log" focused={state.focusedPanel === "log"}>
+              <ActivityPanel />
+            </PanelFrame>
+          </Box>
+        </Box>
+        {/* Bottom row: Detail */}
+        <Box height={bottomHeight}>
+          <PanelFrame title="Detail" focused={state.focusedPanel === "detail"}>
+            <DetailPanel />
+          </PanelFrame>
         </Box>
         <StatusBar />
       </Box>
