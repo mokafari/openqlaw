@@ -19,6 +19,7 @@ import {
   resolveContextWindowInfo,
 } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
+import { getEchoDetector } from "../echo-detector.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import {
   ensureAuthProfileStore,
@@ -102,6 +103,26 @@ export async function runEmbeddedPiAgent(
           });
         } catch {
           // Prediction logging not available or failed - ignore
+        }
+      }
+
+      // Echo detection - prevent responding to our own messages echoed back
+      if (params.commandBody && !isProbeSession) {
+        const detector = getEchoDetector();
+        const echoCheck = detector.detectEcho(params.commandBody, params.sessionKey);
+        if (echoCheck.isEcho) {
+          log.warn(
+            `[EchoDetector] Message is an echo (${echoCheck.timeSinceOriginal}ms old): ${echoCheck.reason}. Skipping.`,
+          );
+          return {
+            success: false,
+            error: "Echo detected - message appears to be our own output",
+            meta: {
+              exitCode: 1,
+              signal: undefined,
+              duration: 0,
+            },
+          };
         }
       }
 
