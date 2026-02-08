@@ -126,10 +126,28 @@ export class EchoDetector {
   }
 
   /**
+   * Normalize content before hashing
+   * Removes TTS encoding artifacts, control characters, and whitespace variations
+   */
+  private normalizeContent(content: string): string {
+    return (
+      content
+        // Remove TTS/encoding artifacts (common prefixes like ��, control chars)
+        .replace(/^[\u0000-\u001f\ufffd\ufffe\uffff]+/g, "")
+        // Remove replacement characters anywhere
+        .replace(/[\ufffd]/g, "")
+        // Normalize whitespace
+        .replace(/\s+/g, " ")
+        .trim()
+    );
+  }
+
+  /**
    * Hash content using SHA256
    */
   private hashContent(content: string): string {
-    return crypto.createHash("sha256").update(content).digest("hex");
+    const normalized = this.normalizeContent(content);
+    return crypto.createHash("sha256").update(normalized).digest("hex");
   }
 }
 
