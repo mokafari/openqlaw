@@ -6,6 +6,10 @@ import type { ResolvedTimeFormat } from "../date-time.js";
 import type { EmbeddedContextFile } from "../pi-embedded-helpers.js";
 import type { EmbeddedSandboxInfo } from "./types.js";
 import type { ReasoningLevel, ThinkLevel } from "./utils.js";
+import {
+  buildVersionedSystemPrompt,
+  type SessionPromptInfo,
+} from "../prompts/session-attribution.js";
 import { buildAgentSystemPrompt, type PromptMode } from "../system-prompt.js";
 import { buildToolSummaryMap } from "../tool-summaries.js";
 
@@ -58,7 +62,7 @@ export async function buildEmbeddedSystemPrompt(params: {
   activeClusters?: string[];
   /** Context budget for FSM-aware section filtering */
   contextBudget?: ContextBudget;
-}): Promise<string> {
+}): Promise<{ prompt: string; promptInfo: SessionPromptInfo }> {
   const basePrompt = await buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
     defaultThinkLevel: params.defaultThinkLevel,
@@ -92,12 +96,33 @@ export async function buildEmbeddedSystemPrompt(params: {
   });
 
   // Apply evolution genotype modifications (non-blocking, falls back gracefully)
+  let finalPrompt = basePrompt;
   try {
     const { applyCurrentGenotypeToPrompt } = await import("../evolution/integration.js");
-    return await applyCurrentGenotypeToPrompt(basePrompt);
+    finalPrompt = await applyCurrentGenotypeToPrompt(basePrompt);
   } catch {
-    // Evolution module not available or failed to load - return base prompt
-    return basePrompt;
+    // Evolution module not available or failed to load - use base prompt
+  }
+
+  // Apply prompt versioning and A/B testing (non-blocking, falls back gracefully)
+  try {
+    return await buildVersionedSystemPrompt(finalPrompt, params.sessionKey, {
+      author: "system",
+      rationale: "Auto-generated system prompt",
+    });
+  } catch (error) {
+    console.warn("Failed to apply prompt versioning:", error);
+    // Fallback: return unversioned prompt with basic info
+    return {
+      prompt: finalPrompt,
+      promptInfo: {
+        system: {
+          id: "fallback",
+          name: "system-main",
+          hash: "fallback",
+        },
+      },
+    };
   }
 }
 

@@ -13,6 +13,7 @@ import { jsonResult, readStringParam } from "./common.js";
 
 const EpisodicRecallSchema = Type.Object({
   query: Type.String(),
+  includeSemantic: Type.Optional(Type.Boolean()),
 });
 
 export function createEpisodicRecallTool(options: {
@@ -34,10 +35,12 @@ export function createEpisodicRecallTool(options: {
     description:
       "Search episodic memory for relevant past experiences, decisions, and patterns. " +
       "Uses current agent state and goals for context-aware retrieval. " +
-      "Returns structured episodes with summaries, tools used, outcomes, and graph-expanded context.",
+      "Returns structured episodes with summaries, tools used, outcomes, and graph-expanded context. " +
+      "Optionally includes related semantic facts (generalized knowledge) when includeSemantic=true.",
     parameters: EpisodicRecallSchema,
     execute: async (_toolCallId, params) => {
       const query = readStringParam(params, "query", { required: true });
+      const includeSemantic = params.includeSemantic === true;
 
       try {
         // Lazy imports to avoid loading sqlite when disabled
@@ -110,6 +113,37 @@ export function createEpisodicRecallTool(options: {
           limit: 10,
         });
 
+        // Retrieve semantic facts if requested
+        let semanticFacts: any[] = [];
+        if (includeSemantic) {
+          try {
+            const { SemanticStore } = await import("../episodic/semantic-store.js");
+            const semanticDbPath = path.join(options.agentDir!, "episodic", "semantic.db");
+            const semanticStore = new SemanticStore(semanticDbPath);
+            await semanticStore.initVec().catch(() => {});
+
+            const semanticResults = await semanticStore.queryFacts(query, {
+              limit: 5,
+              embeddingProvider: embResult.provider,
+            });
+
+            semanticFacts = semanticResults.map((r) => ({
+              statement: r.fact.statement,
+              type: r.fact.type,
+              concept: r.fact.concept,
+              confidence: Number(r.fact.confidence.toFixed(3)),
+              evidenceCount: r.fact.evidenceCount,
+              relevance: Number(r.relevance.toFixed(3)),
+              age: formatAge(r.fact.createdAt),
+            }));
+
+            semanticStore.close();
+          } catch (err) {
+            console.warn("Semantic fact retrieval failed:", err);
+            // Non-fatal: continue without semantic facts
+          }
+        }
+
         // Close the store after query
         store.close();
 
@@ -126,10 +160,17 @@ export function createEpisodicRecallTool(options: {
           age: formatAge(r.episode.createdAt),
         }));
 
-        return jsonResult({
-          results: formatted,
+        const result: any = {
+          episodes: formatted,
           totalEpisodes: results.length,
-        });
+        };
+
+        if (includeSemantic) {
+          result.semanticFacts = semanticFacts;
+          result.totalSemanticFacts = semanticFacts.length;
+        }
+
+        return jsonResult(result);
       } catch (err) {
         return jsonResult({
           error: `Episodic recall failed: ${err instanceof Error ? err.message : String(err)}`,

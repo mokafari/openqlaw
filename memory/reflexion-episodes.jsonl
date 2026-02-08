@@ -1,0 +1,6 @@
+{"id":"45ad8c78-57b0-431c-96eb-3483574fcf88","timestamp":"2026-02-08T00:14:47.793Z","sessionKey":"agent:test:auto","task":"hello","trajectory":[],"outcome":"success","heuristic":1,"duration":59,"toolsUsed":[]}
+{"id":"22ab45ed-703b-4886-995c-b9b07e6f1b20","timestamp":"2026-02-08T00:14:47.844Z","sessionKey":"agent:test:user","task":"hello","trajectory":[],"outcome":"success","heuristic":1,"duration":33,"toolsUsed":[]}
+{"id":"b0ebf94c-6b6d-47e9-b8a5-614b03129af6","timestamp":"2026-02-08T00:14:47.854Z","sessionKey":"agent:test:user-cooldown","task":"hello","trajectory":[],"outcome":"success","heuristic":1,"duration":0,"toolsUsed":[]}
+{"id":"2024f742-23c8-472b-93df-9b8ebdcee9bb","timestamp":"2026-02-08T00:14:47.976Z","sessionKey":"agent:test:mismatch","task":"hello","trajectory":[],"outcome":"success","heuristic":1,"duration":24,"toolsUsed":[]}
+{"id":"7a06db6f-04e4-46e8-9309-5d353e3959de","timestamp":"2026-02-08T00:14:47.979Z","sessionKey":"agent:test:skip-cooldown","task":"hello","trajectory":[],"outcome":"success","heuristic":1,"duration":0,"toolsUsed":[]}
+{"id":"062a1bed-5cb8-4e22-80ad-5b61af1460a4","timestamp":"2026-02-08T00:14:48.047Z","sessionKey":"agent:test:rotate-skip-cooldown","task":"hello","trajectory":[],"outcome":"success","heuristic":1,"duration":0,"toolsUsed":[]}

@@ -32,6 +32,7 @@ import {
 import { createImageTool } from "./tools/image-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
+import { createSemanticQueryTool } from "./tools/semantic-query-tool.js";
 import { createSessionDiffTool } from "./tools/session-diff.js";
 import { createSessionStatusTool } from "./tools/session-status-tool.js";
 import { createSessionsHistoryTool } from "./tools/sessions-history-tool.js";
@@ -209,7 +210,7 @@ export function createOpenClawTools(options?: {
     );
   }
 
-  // Episodic recall tool (gated behind episodic config)
+  // Episodic memory tools (gated behind episodic config)
   const episodicRecallTool = createEpisodicRecallTool({
     config: options?.config,
     agentDir: options?.agentDir,
@@ -217,6 +218,14 @@ export function createOpenClawTools(options?: {
   });
   if (episodicRecallTool) {
     tools.push(episodicRecallTool);
+  }
+
+  const semanticQueryTool = createSemanticQueryTool({
+    config: options?.config,
+    agentDir: options?.agentDir,
+  });
+  if (semanticQueryTool) {
+    tools.push(semanticQueryTool);
   }
 
   // Dynamic tool creation/removal/listing (gated behind evolution or fuzzyModelSelection)
