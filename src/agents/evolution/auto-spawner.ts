@@ -31,7 +31,7 @@ export class AutoSpawner {
     const task = this.buildRecoveryTask(params.error, params.logs, params.workspaceDir);
 
     // Prefer sessions-spawn for native integration
-    if (params.strategy === "sessions-spawn" || params.strategy === "pi") {
+    if (params.strategy === "sessions-spawn") {
       return {
         sessionId,
         command: "", // Not used for sessions-spawn

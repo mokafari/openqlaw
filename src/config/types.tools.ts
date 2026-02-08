@@ -546,5 +546,18 @@ export type ToolsConfig = {
       /** Weight recall results by goal overlap (default: true). */
       goalWeighting?: boolean;
     };
+    /** Telemetry monitor for tracking tool error rates. */
+    telemetryMonitor?: {
+      /** Enable telemetry monitoring (default: false). */
+      enabled?: boolean;
+      /** Error rate threshold to trigger action (default: 0.2 = 20%). */
+      errorRateThreshold?: number;
+      /** Minimum tool calls before error rate is calculated (default: 5). */
+      minToolCalls?: number;
+      /** Check interval in milliseconds (default: 60000 = 1 minute). */
+      checkIntervalMs?: number;
+      /** Auto-trigger mutation when threshold exceeded (default: false). */
+      autoMutate?: boolean;
+    };
   };
 };

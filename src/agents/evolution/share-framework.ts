@@ -708,9 +708,12 @@ interface TestResults {
 }
 
 // Example usage and testing
-if (require.main === module) {
+// Demo/test code - only run if explicitly invoked
+// Removed CommonJS pattern (require.main === module) for ES module compatibility
+// To run demo: import and call runDemo() explicitly
+export function runDemo() {
   console.log("🚀 Share Framework for OpenClaw - Demo");
-  console.log("=" * 50);
+  console.log("=".repeat(50));
 
   const tester = new ShareFrameworkTester();
   const results = tester.testToolSelectionScenarios();

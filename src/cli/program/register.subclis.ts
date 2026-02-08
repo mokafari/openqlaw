@@ -121,6 +121,14 @@ const entries: SubCliEntry[] = [
     },
   },
   {
+    name: "central",
+    description: "Live monitoring dashboard",
+    register: async (program) => {
+      const mod = await import("../central-cli.js");
+      mod.registerCentralCli(program);
+    },
+  },
+  {
     name: "tui",
     description: "Terminal UI",
     register: async (program) => {

@@ -223,7 +223,7 @@ export async function fetchSimilarPatternsForSatisfaction(params: {
     const embedding = await embeddingProvider.embedQuery(contextText.slice(0, 2000));
 
     // Search for similar patterns
-    const results = await patternStore.searchSimilar(embedding, { limit });
+    const results = await patternStore.searchByVector(embedding, limit);
 
     return results;
   } catch (err) {

@@ -11,7 +11,7 @@ export async function buildDiagnosticAgentPrompt(params: {
   sourceFile?: string;
   workspaceDir?: string;
   gitContext?: string;
-}): string {
+}): Promise<string> {
   const lines: string[] = [];
 
   lines.push("# Diagnostic Agent: Tool Failure Analysis");

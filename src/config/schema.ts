@@ -177,6 +177,13 @@ const FIELD_LABELS: Record<string, string> = {
   "tools.evolution.selfModification.policyPath": "Self-Modification Policy Path",
   "tools.evolution.selfModification.maxConcurrentMutations": "Max Concurrent Mutations",
   "tools.evolution.selfModification.autoTrigger": "Auto-Trigger Mutation Cycle",
+  "tools.evolution.episodic.enabled": "Enable Episodic Memory",
+  "tools.evolution.episodic.maxEpisodes": "Max Episodes",
+  "tools.evolution.episodic.episodeTtlDays": "Episode TTL (Days)",
+  "tools.evolution.episodic.maxEntities": "Max Entities",
+  "tools.evolution.episodic.graphDepth": "Graph Depth",
+  "tools.evolution.episodic.stateWeighting": "State Weighting",
+  "tools.evolution.episodic.goalWeighting": "Goal Weighting",
   "tools.exec.notifyOnExit": "Exec Notify On Exit",
   "tools.exec.approvalRunningNoticeMs": "Exec Approval Running Notice (ms)",
   "tools.exec.host": "Exec Host",
@@ -464,6 +471,19 @@ const FIELD_HELP: Record<string, string> = {
     "Maximum number of concurrent mutations allowed (default: 1).",
   "tools.evolution.selfModification.autoTrigger":
     "Automatically trigger mutation cycle when tool error rate exceeds threshold (default: false).",
+  "tools.evolution.episodic.enabled":
+    "Enable episodic memory and knowledge graph for cross-session structured recall (default: false).",
+  "tools.evolution.episodic.maxEpisodes": "Maximum number of stored episodes (default: 5000).",
+  "tools.evolution.episodic.episodeTtlDays":
+    "Days before unused episodes are pruned (default: 180).",
+  "tools.evolution.episodic.maxEntities":
+    "Maximum number of knowledge graph entities (default: 10000).",
+  "tools.evolution.episodic.graphDepth":
+    "Max graph traversal depth for recall expansion (default: 3).",
+  "tools.evolution.episodic.stateWeighting":
+    "Weight recall results by FSM state match (default: true).",
+  "tools.evolution.episodic.goalWeighting":
+    "Weight recall results by goal overlap (default: true).",
   "tools.exec.notifyOnExit":
     "When true (default), backgrounded exec sessions enqueue a system event and request a heartbeat on exit.",
   "tools.exec.pathPrepend": "Directories to prepend to PATH for exec runs (gateway/sandbox).",

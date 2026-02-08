@@ -56,7 +56,7 @@ export class EvolutionDaemon {
       errorRateThreshold: config.errorRateThreshold ?? 0.2, // 20% error rate
       minSessionsForEvolution: config.minSessionsForEvolution ?? 10,
       autoMutate: config.autoMutate ?? true,
-      statsDir: config.statsDir,
+      statsDir: config.statsDir ?? undefined,
       workspaceDir: config.workspaceDir ?? process.cwd(),
     };
 

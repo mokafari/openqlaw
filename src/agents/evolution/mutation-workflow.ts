@@ -5,7 +5,7 @@ import { callGateway } from "../../gateway/call.js";
 import { log } from "../pi-embedded-runner/logger.js";
 import { runEvolutionDojoTask } from "./dojo-runner.ts";
 import { createGitTools } from "./git-tools.js";
-import { Mutator, type FileHotspot } from "./mutator.js";
+import { Mutator, type FileHotspot, type ToolHotspot } from "./mutator.js";
 import { applyPatchToCodebase, savePatch, updatePatchStatus } from "./patches.js";
 import { validatePatch } from "./policy-guard.js";
 
@@ -113,10 +113,7 @@ export class MutationWorkflow {
   /**
    * Process a single hotspot through the full mutation cycle.
    */
-  private async processHotspot(hotspot: {
-    toolName: string;
-    errorRate: number;
-  }): Promise<MutationResult> {
+  private async processHotspot(hotspot: ToolHotspot): Promise<MutationResult> {
     try {
       // Step 1: Spawn Diagnostic Agent (Root Cause Analysis)
       const diagnostic = await this.mutator.spawnDiagnosticAgent(hotspot);

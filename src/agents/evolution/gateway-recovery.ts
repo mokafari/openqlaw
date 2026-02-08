@@ -20,12 +20,12 @@ export type BuildFailureParams = {
 export class GatewayRecovery {
   private readonly workspaceDir: string;
   private readonly maxRetries: number;
-  private readonly agentStrategy: "claude-code" | "codex" | "opencode" | "pi";
+  private readonly agentStrategy: "claude-code" | "gemini" | "sessions-spawn";
 
   constructor(params?: {
     workspaceDir?: string;
     maxRetries?: number;
-    agentStrategy?: "claude-code" | "codex" | "opencode" | "pi";
+    agentStrategy?: "claude-code" | "gemini" | "sessions-spawn";
   }) {
     this.workspaceDir = params?.workspaceDir ?? process.cwd();
     this.maxRetries = params?.maxRetries ?? 3;

@@ -144,15 +144,15 @@ async function logReflexionEpisode(params: {
       action: `${tool.toolName}${tool.meta ? ": " + tool.meta.slice(0, 50) : ""}`,
       tool: tool.toolName,
       thought: index === 0 ? "Starting task execution" : undefined,
-      observation: toolErrors[tool.toolName]
-        ? `Error: ${toolErrors[tool.toolName].lastError}`
+      observation: params.toolErrors[tool.toolName]
+        ? `Error: ${params.toolErrors[tool.toolName].lastError}`
         : "Success",
       timestamp: new Date(
         Date.now() -
           params.meta.durationMs +
           (index * params.meta.durationMs) / params.toolMetas.length,
       ).toISOString(),
-      success: !toolErrors[tool.toolName],
+      success: !params.toolErrors[tool.toolName],
     }));
 
     // Determine episode outcome

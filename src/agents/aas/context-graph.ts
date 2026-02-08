@@ -994,13 +994,14 @@ export class ContextGraph {
     }
 
     // Check if at least one profiling tool is available
-    const hasProfiler =
+    const hasProfiler = Boolean(
       cliTools["clinic"] ||
       cliTools["0x"] ||
       cliTools["flamegraph"] ||
       cliTools["perf"] ||
       cliTools["dtrace"] ||
-      (cliTools["node"] && other["node --prof"]);
+      (cliTools["node"] && other["node --prof"]),
+    );
 
     if (!hasProfiler) {
       missing.push("profiling tools (clinic, 0x, perf, or Node.js --prof)");

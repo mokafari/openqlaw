@@ -47,7 +47,7 @@ export class TelemetryMonitor {
       minToolCalls: config.minToolCalls ?? 5,
       checkIntervalMs: config.checkIntervalMs ?? 60_000, // Check every minute
       autoMutate: config.autoMutate ?? false,
-      statsDir: config.statsDir,
+      statsDir: config.statsDir ?? "",
       workspaceDir: config.workspaceDir ?? process.cwd(),
     };
   }

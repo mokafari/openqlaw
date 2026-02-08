@@ -2,7 +2,7 @@
  * Meta-Learning Tool: Allows agents to log predictions and outcomes
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type, type Static } from "@sinclair/typebox";
 import { randomUUID } from "node:crypto";
 import type { AnyAgentTool } from "../tools/common.js";
 import { jsonResult } from "../tools/common.js";
@@ -41,7 +41,7 @@ export function createMetaLearningTool(): AnyAgentTool {
       "Log predictions and outcomes for meta-learning. Track calibration, analyze patterns, and access learning journal entries.",
     parameters: MetaLearningToolSchema,
     execute: async (_toolCallId, args) => {
-      const params = args as Type.Static<typeof MetaLearningToolSchema>;
+      const params = args as Static<typeof MetaLearningToolSchema>;
       const action = params.action;
 
       try {

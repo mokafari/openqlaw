@@ -313,10 +313,10 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
         continue;
       }
 
-      if (line.startsWith("- ") && currentSection) {
+      if (line.startsWith("- ") && currentSection && currentSection !== "date") {
         const item = line.replace("- ", "").trim();
-        if (item && currentSection !== "date") {
-          entry[currentSection].push(item);
+        if (item) {
+          (entry[currentSection] as string[]).push(item);
         }
       }
     }

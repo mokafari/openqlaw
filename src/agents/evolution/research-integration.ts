@@ -111,19 +111,19 @@ export class ResearchIntegration {
     };
 
     // 1. Classify task type (for Share Framework)
-    let taskType: TaskType = "general";
+    let taskType: TaskType = TaskType.OTHER;
     if (context.requestedTools?.some((t) => t.includes("browser"))) {
-      taskType = "browser";
+      taskType = TaskType.BROWSER;
     } else if (context.requestedTools?.some((t) => ["read", "write", "edit"].includes(t))) {
-      taskType = "file_ops";
+      taskType = TaskType.FILE_OPS;
     } else if (context.requestedTools?.some((t) => t.includes("message"))) {
-      taskType = "communication";
+      taskType = TaskType.COMMUNICATION;
     } else if (context.requestedTools?.some((t) => t.includes("exec"))) {
-      taskType = "self_modification";
+      taskType = TaskType.SELF_MODIFICATION;
     } else if (context.requestedTools?.some((t) => t.includes("web_"))) {
-      taskType = "api";
+      taskType = TaskType.API;
     } else if (context.requestedTools?.some((t) => t.includes("nodes"))) {
-      taskType = "devices";
+      taskType = TaskType.DEVICE;
     }
 
     result.subspace = taskType;
@@ -131,9 +131,11 @@ export class ResearchIntegration {
     // 2. Share Framework routing (parameter efficiency)
     if (this.shareRouter) {
       try {
-        const routing = this.shareRouter.route(taskType, context.userMessage || "");
+        const subspaces = this.shareRouter.selectSubspaces(taskType, {
+          requestedTools: context.requestedTools,
+        });
         if (this.config.shareFramework?.logRouting) {
-          console.log(`[ShareFramework] Routed ${taskType} to subspaces:`, routing.activeSubspaces);
+          console.log(`[ShareFramework] Routed ${taskType} to subspaces:`, subspaces);
         }
       } catch (err) {
         console.warn("[ShareFramework] Routing failed:", err);
@@ -194,16 +196,16 @@ export class ResearchIntegration {
    */
   private inferRoleFromTask(taskType: TaskType): string {
     switch (taskType) {
-      case "browser":
+      case TaskType.BROWSER:
         return "browser-operator";
-      case "file_ops":
+      case TaskType.FILE_OPS:
         return "filesystem-analyst";
-      case "self_modification":
+      case TaskType.SELF_MODIFICATION:
         return "evolution-engineer";
-      case "api":
-      case "communication":
+      case TaskType.API:
+      case TaskType.COMMUNICATION:
         return "communicator";
-      case "devices":
+      case TaskType.DEVICE:
         return "browser-operator"; // Closest match
       default:
         return "general-assistant";
@@ -215,10 +217,10 @@ export class ResearchIntegration {
    */
   private assessRiskLevel(taskType: TaskType): "low" | "medium" | "high" {
     switch (taskType) {
-      case "self_modification":
+      case TaskType.SELF_MODIFICATION:
         return "high";
-      case "file_ops":
-      case "devices":
+      case TaskType.FILE_OPS:
+      case TaskType.DEVICE:
         return "medium";
       default:
         return "low";
