@@ -71,3 +71,6 @@ USER.md
 
 # local tooling
 .serena/
+
+# Agent memory files (should be in workspace, not repo)
+memory/
