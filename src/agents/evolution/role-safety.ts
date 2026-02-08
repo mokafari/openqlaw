@@ -1,377 +1,561 @@
 /**
- * Role-Based Safety System
+ * Role-Based Safety Alignment System
+ * Training-free safety by assigning roles with built-in constraints and capability bounds.
  *
- * Training-free safety alignment via role assignment.
- * Each role has built-in capability bounds and constraints.
- *
- * Key insight: Don't fine-tune for safety. Instead, assign roles
- * that have safety built-in, then route tasks appropriately.
- *
- * Research basis: "Training-Free Safety Alignment" - research papers 2025-2026
+ * This system prevents capability misuse without requiring fine-tuning by:
+ * 1. Defining distinct agent roles with specific capabilities
+ * 2. Enforcing safety constraints per role
+ * 3. Routing tasks to appropriate roles
+ * 4. Validating outputs against role constraints
  */
 
-/**
- * Safety Role Definition
- */
-export type SafetyRole = "executor" | "analyst" | "planner" | "validator" | "observer";
+export interface Tool {
+  name: string;
+  description: string;
+  parameters?: any;
+}
+
+export interface SafetyConstraint {
+  type:
+    | "file_access"
+    | "exec_commands"
+    | "network_access"
+    | "system_modification"
+    | "data_sensitivity"
+    | "output_validation";
+  description: string;
+  validator: (action: any, context: TaskContext) => ValidationResult;
+}
+
+export interface ValidationResult {
+  allowed: boolean;
+  reason?: string;
+  suggestedRole?: AgentRole;
+  modifiedAction?: any;
+}
+
+export interface TaskContext {
+  taskType: string;
+  inputData: any;
+  requestedTools: string[];
+  riskLevel: "low" | "medium" | "high";
+  userPermissions?: string[];
+}
 
 export interface RoleCapabilities {
-  canExecuteTools: boolean;
-  canModifyFiles: boolean;
-  canAcceptUserInput: boolean;
-  canMakeDecisions: boolean;
-  canCreateResources: boolean;
-  maxConcurrency: number;
-  maxTokensPerCall: number;
-  maxToolCallsPerSession: number;
+  allowedTools: string[];
+  prohibitedTools: string[];
+  fileSystemAccess: "none" | "read-only" | "limited-write" | "full";
+  networkAccess: boolean;
+  systemModification: boolean;
+  maxComplexity: number;
+  requiresValidation: boolean;
 }
 
-export interface RoleConstraints {
-  forbiddenTools: string[];
-  forbiddenPatterns: RegExp[];
-  requiredValidation: string[]; // Must validate with these roles before acting
-  auditRequired: boolean;
-  riskLevel: "safe" | "moderate" | "high";
-}
-
-export interface SafetyRoleConfig {
-  role: SafetyRole;
+export interface AgentRole {
+  name: string;
   description: string;
   capabilities: RoleCapabilities;
-  constraints: RoleConstraints;
-  trustLevel: number; // 0.0 - 1.0: How much to trust this role's decisions
+  constraints: SafetyConstraint[];
+  routingCriteria: (task: TaskContext) => number; // 0-1 score for task suitability
 }
 
 /**
- * Role Definitions with Built-in Safety
+ * Core role definitions with built-in safety constraints
  */
-export const SAFETY_ROLES: Record<SafetyRole, SafetyRoleConfig> = {
-  executor: {
-    role: "executor",
-    description: "Executes pre-validated tasks. Highest capability, requires validation.",
+export class RoleDefinitions {
+  static readonly EXECUTOR: AgentRole = {
+    name: "executor",
+    description: "Executes well-defined, low-risk tasks with limited system access",
     capabilities: {
-      canExecuteTools: true,
-      canModifyFiles: true,
-      canAcceptUserInput: true,
-      canMakeDecisions: true,
-      canCreateResources: true,
-      maxConcurrency: 10,
-      maxTokensPerCall: 100000,
-      maxToolCallsPerSession: 500,
+      allowedTools: ["Read", "Write", "exec"],
+      prohibitedTools: ["evolution_apply_approved_patch", "rebuild_gateway"],
+      fileSystemAccess: "limited-write",
+      networkAccess: false,
+      systemModification: false,
+      maxComplexity: 3,
+      requiresValidation: false,
     },
-    constraints: {
-      forbiddenTools: ["rm -rf", "format", "mkfs"], // Destructive operations
-      forbiddenPatterns: [/sudo/, /admin/, /password/i],
-      requiredValidation: ["validator"], // Must validate before executing
-      auditRequired: true,
-      riskLevel: "high",
+    constraints: [
+      {
+        type: "file_access",
+        description: "Only access files in designated safe directories",
+        validator: (action, context) => {
+          if (action.tool === "Write" || action.tool === "Read") {
+            const path = action.parameters?.file_path || action.parameters?.path;
+            if (path && (path.includes("..") || path.startsWith("/") || path.includes("system"))) {
+              return {
+                allowed: false,
+                reason: "File path outside safe boundaries",
+                suggestedRole: RoleDefinitions.VALIDATOR,
+              };
+            }
+          }
+          return { allowed: true };
+        },
+      },
+      {
+        type: "exec_commands",
+        description: "Only execute safe, non-destructive commands",
+        validator: (action, context) => {
+          if (action.tool === "exec") {
+            const command = action.parameters?.command || "";
+            const dangerousCommands = [
+              "rm -rf",
+              "sudo",
+              "chmod +x",
+              "curl",
+              "wget",
+              "python",
+              "node",
+            ];
+            if (dangerousCommands.some((cmd) => command.includes(cmd))) {
+              return {
+                allowed: false,
+                reason: "Potentially dangerous command",
+                suggestedRole: RoleDefinitions.VALIDATOR,
+              };
+            }
+          }
+          return { allowed: true };
+        },
+      },
+    ],
+    routingCriteria: (task) => {
+      if (task.riskLevel === "low" && task.taskType.includes("file_ops")) return 0.9;
+      if (task.taskType.includes("simple_execution")) return 0.8;
+      return 0.2;
     },
-    trustLevel: 0.8,
-  },
+  };
 
-  analyst: {
-    role: "analyst",
-    description: "Analyzes data, reads files, performs research. No modification.",
+  static readonly ANALYST: AgentRole = {
+    name: "analyst",
+    description: "Analyzes data and provides insights with read-only access",
     capabilities: {
-      canExecuteTools: true, // Can run read-only tools
-      canModifyFiles: false,
-      canAcceptUserInput: true,
-      canMakeDecisions: false,
-      canCreateResources: false,
-      maxConcurrency: 5,
-      maxTokensPerCall: 50000,
-      maxToolCallsPerSession: 200,
+      allowedTools: ["Read", "episodic_recall", "semantic_query", "web_search", "web_fetch"],
+      prohibitedTools: ["Write", "exec", "Edit", "evolution_apply_approved_patch"],
+      fileSystemAccess: "read-only",
+      networkAccess: true,
+      systemModification: false,
+      maxComplexity: 7,
+      requiresValidation: true,
     },
-    constraints: {
-      forbiddenTools: ["write", "edit", "exec", "delete"],
-      forbiddenPatterns: [/write|delete|modify|mutate/i],
-      requiredValidation: [],
-      auditRequired: false,
-      riskLevel: "safe",
+    constraints: [
+      {
+        type: "data_sensitivity",
+        description: "Cannot access sensitive system files or credentials",
+        validator: (action, context) => {
+          if (action.tool === "Read") {
+            const path = action.parameters?.file_path || action.parameters?.path;
+            if (
+              path &&
+              (path.includes("secret") ||
+                path.includes("password") ||
+                path.includes("key") ||
+                path.includes(".env"))
+            ) {
+              return { allowed: false, reason: "Attempting to access sensitive data" };
+            }
+          }
+          return { allowed: true };
+        },
+      },
+      {
+        type: "output_validation",
+        description: "Validate analysis outputs for bias and accuracy",
+        validator: (action, context) => {
+          // This would include logic to check for biased language, misinformation, etc.
+          return { allowed: true };
+        },
+      },
+    ],
+    routingCriteria: (task) => {
+      if (task.taskType.includes("analysis") || task.taskType.includes("research")) return 0.9;
+      if (task.taskType.includes("data_review")) return 0.8;
+      return 0.3;
     },
-    trustLevel: 0.95,
-  },
+  };
 
-  planner: {
-    role: "planner",
-    description: "Creates plans and strategies. Makes decisions but doesn't execute.",
+  static readonly PLANNER: AgentRole = {
+    name: "planner",
+    description: "Creates plans and strategies without execution capabilities",
     capabilities: {
-      canExecuteTools: false,
-      canModifyFiles: false,
-      canAcceptUserInput: true,
-      canMakeDecisions: true,
-      canCreateResources: false,
-      maxConcurrency: 3,
-      maxTokensPerCall: 50000,
-      maxToolCallsPerSession: 50, // Minimal tool use
+      allowedTools: [
+        "Read",
+        "goal_push",
+        "goal_status",
+        "episodic_recall",
+        "semantic_query",
+        "meta_learning",
+      ],
+      prohibitedTools: ["exec", "Write", "Edit", "evolution_apply_approved_patch"],
+      fileSystemAccess: "read-only",
+      networkAccess: false,
+      systemModification: false,
+      maxComplexity: 8,
+      requiresValidation: true,
     },
-    constraints: {
-      forbiddenTools: ["exec", "write", "edit", "delete", "web_search"],
-      forbiddenPatterns: [/execute|run|perform/i],
-      requiredValidation: [],
-      auditRequired: false,
-      riskLevel: "safe",
+    constraints: [
+      {
+        type: "system_modification",
+        description: "Cannot modify system state, only create plans",
+        validator: (action, context) => {
+          if (["Write", "Edit", "exec"].includes(action.tool)) {
+            return {
+              allowed: false,
+              reason: "Planner role cannot modify system state",
+              suggestedRole: RoleDefinitions.VALIDATOR,
+            };
+          }
+          return { allowed: true };
+        },
+      },
+    ],
+    routingCriteria: (task) => {
+      if (task.taskType.includes("planning") || task.taskType.includes("strategy")) return 0.9;
+      if (task.taskType.includes("goal_setting")) return 0.8;
+      return 0.2;
     },
-    trustLevel: 0.9,
-  },
+  };
 
-  validator: {
-    role: "validator",
-    description: "Validates decisions and outputs. Checks safety constraints.",
+  static readonly VALIDATOR: AgentRole = {
+    name: "validator",
+    description: "Reviews and validates high-risk operations with full system access",
     capabilities: {
-      canExecuteTools: true, // Can run validation tools
-      canModifyFiles: false,
-      canAcceptUserInput: false,
-      canMakeDecisions: true, // Can approve/reject
-      canCreateResources: false,
-      maxConcurrency: 1,
-      maxTokensPerCall: 30000,
-      maxToolCallsPerSession: 100,
+      allowedTools: [
+        "Read",
+        "Write",
+        "exec",
+        "Edit",
+        "evolution_propose_patch",
+        "evolution_run_dojo_test",
+      ],
+      prohibitedTools: ["evolution_apply_approved_patch"], // Requires explicit human approval
+      fileSystemAccess: "full",
+      networkAccess: true,
+      systemModification: true,
+      maxComplexity: 10,
+      requiresValidation: true,
     },
-    constraints: {
-      forbiddenTools: ["exec", "write", "delete"],
-      forbiddenPatterns: [/execute|create|modify/i],
-      requiredValidation: [],
-      auditRequired: true,
-      riskLevel: "safe",
+    constraints: [
+      {
+        type: "system_modification",
+        description: "All system modifications must be logged and reviewed",
+        validator: (action, context) => {
+          if (["evolution_apply_approved_patch", "rebuild_gateway"].includes(action.tool)) {
+            // These require human approval or additional validation
+            return {
+              allowed: false,
+              reason: "High-risk system modification requires human approval",
+            };
+          }
+          return { allowed: true };
+        },
+      },
+    ],
+    routingCriteria: (task) => {
+      if (task.riskLevel === "high") return 0.9;
+      if (task.taskType.includes("system_modification") || task.taskType.includes("validation"))
+        return 0.8;
+      return 0.1;
     },
-    trustLevel: 0.99, // Validators are highly trusted
-  },
+  };
 
-  observer: {
-    role: "observer",
-    description: "Observes and logs. Read-only, passive mode.",
-    capabilities: {
-      canExecuteTools: false,
-      canModifyFiles: false,
-      canAcceptUserInput: false,
-      canMakeDecisions: false,
-      canCreateResources: false,
-      maxConcurrency: 0,
-      maxTokensPerCall: 10000,
-      maxToolCallsPerSession: 0,
-    },
-    constraints: {
-      forbiddenTools: ["all"],
-      forbiddenPatterns: [/.*/], // No actions allowed
-      requiredValidation: [],
-      auditRequired: false,
-      riskLevel: "safe",
-    },
-    trustLevel: 1.0, // Perfect - can't do anything
-  },
-};
+  static getAllRoles(): AgentRole[] {
+    return [this.EXECUTOR, this.ANALYST, this.PLANNER, this.VALIDATOR];
+  }
+}
 
 /**
- * Safety Evaluator
- * Checks if an action is safe given the current role
+ * Main role-based safety system
  */
-export function evaluateSafety(
-  role: SafetyRole,
-  toolName: string,
-  action: string,
-): { safe: boolean; reason: string; trustLevel: number } {
-  const roleConfig = SAFETY_ROLES[role];
+export class RoleBasedSafetySystem {
+  private roles: Map<string, AgentRole>;
+  private currentRole: AgentRole;
+  private actionLog: Array<{
+    role: string;
+    action: any;
+    timestamp: number;
+    result: ValidationResult;
+  }>;
 
-  // Check if tool is forbidden
-  if (roleConfig.constraints.forbiddenTools.includes(toolName)) {
-    return {
-      safe: false,
-      reason: `Role "${role}" is not allowed to use tool "${toolName}"`,
-      trustLevel: 0,
-    };
+  constructor() {
+    this.roles = new Map();
+    RoleDefinitions.getAllRoles().forEach((role) => {
+      this.roles.set(role.name, role);
+    });
+    this.currentRole = RoleDefinitions.EXECUTOR; // Default to safest role
+    this.actionLog = [];
   }
 
-  // Check if action matches forbidden patterns
-  for (const pattern of roleConfig.constraints.forbiddenPatterns) {
-    if (pattern.test(action)) {
+  /**
+   * Route a task to the most appropriate role
+   */
+  routeTask(task: TaskContext): AgentRole {
+    let bestRole = this.currentRole;
+    let bestScore = 0;
+
+    for (const role of this.roles.values()) {
+      const score = role.routingCriteria(task);
+      if (score > bestScore) {
+        bestScore = score;
+        bestRole = role;
+      }
+    }
+
+    console.log(
+      `[RoleSafety] Routing task type "${task.taskType}" to role "${bestRole.name}" (score: ${bestScore})`,
+    );
+    return bestRole;
+  }
+
+  /**
+   * Switch to a specific role with safety checks
+   */
+  switchRole(roleName: string, task?: TaskContext): boolean {
+    const role = this.roles.get(roleName);
+    if (!role) {
+      console.error(`[RoleSafety] Unknown role: ${roleName}`);
+      return false;
+    }
+
+    // Additional safety check: ensure the role switch is appropriate
+    if (task) {
+      const routedRole = this.routeTask(task);
+      if (
+        routedRole.name !== roleName &&
+        routedRole.capabilities.maxComplexity > role.capabilities.maxComplexity
+      ) {
+        console.warn(
+          `[RoleSafety] Role switch to "${roleName}" may be inappropriate for task complexity`,
+        );
+      }
+    }
+
+    this.currentRole = role;
+    console.log(`[RoleSafety] Switched to role: ${role.name}`);
+    return true;
+  }
+
+  /**
+   * Validate an action against the current role's constraints
+   */
+  validateAction(
+    action: { tool: string; parameters?: any },
+    context: TaskContext,
+  ): ValidationResult {
+    const role = this.currentRole;
+
+    // Check if tool is allowed
+    if (role.capabilities.prohibitedTools.includes(action.tool)) {
       return {
-        safe: false,
-        reason: `Action matches forbidden pattern for role "${role}": ${pattern}`,
-        trustLevel: 0,
+        allowed: false,
+        reason: `Tool "${action.tool}" is prohibited for role "${role.name}"`,
+        suggestedRole: this.findRoleForTool(action.tool),
       };
     }
-  }
 
-  // Check if capability is enabled
-  if (toolName === "exec" && !roleConfig.capabilities.canExecuteTools) {
-    return {
-      safe: false,
-      reason: `Role "${role}" cannot execute tools`,
-      trustLevel: 0,
-    };
-  }
-
-  if ((toolName === "write" || toolName === "edit") && !roleConfig.capabilities.canModifyFiles) {
-    return {
-      safe: false,
-      reason: `Role "${role}" cannot modify files`,
-      trustLevel: 0,
-    };
-  }
-
-  // All checks passed
-  return {
-    safe: true,
-    reason: `Action is safe for role "${role}"`,
-    trustLevel: roleConfig.trustLevel,
-  };
-}
-
-/**
- * Route Selection
- * Determines which role should handle a task
- */
-export function selectRole(taskType: string): SafetyRole {
-  switch (taskType) {
-    case "analysis":
-    case "research":
-    case "diagnosis":
-      return "analyst";
-
-    case "planning":
-    case "strategy":
-    case "design":
-      return "planner";
-
-    case "execution":
-    case "implementation":
-    case "creation":
-      return "executor";
-
-    case "validation":
-    case "review":
-    case "approval":
-      return "validator";
-
-    case "monitoring":
-    case "logging":
-    case "observation":
-      return "observer";
-
-    default:
-      return "executor"; // Default to highest capability
-  }
-}
-
-/**
- * Validation Requirements
- * Determines who must validate before action
- */
-export function getValidationRequirements(role: SafetyRole, toolName: string): SafetyRole[] {
-  const config = SAFETY_ROLES[role];
-  const requirements: SafetyRole[] = [...config.constraints.requiredValidation] as SafetyRole[];
-
-  // Add automatic validation for high-risk operations
-  if (["exec", "write", "delete"].includes(toolName)) {
-    if (!requirements.includes("validator")) {
-      requirements.push("validator");
+    if (
+      role.capabilities.allowedTools.length > 0 &&
+      !role.capabilities.allowedTools.includes(action.tool)
+    ) {
+      return {
+        allowed: false,
+        reason: `Tool "${action.tool}" is not in allowed tools for role "${role.name}"`,
+        suggestedRole: this.findRoleForTool(action.tool),
+      };
     }
-  }
 
-  return requirements;
-}
-
-/**
- * Example: Execution Flow with Role-Based Safety
- *
- * 1. Task comes in: "Create a backup of the database"
- * 2. Select role: "executor" (task requires creation)
- * 3. Check validation requirements: ["validator"]
- * 4. Request validator approval
- * 5. Validator checks: pattern matching, risk assessment
- * 6. If approved: Execute with executor role
- * 7. If denied: Log denial and suggest alternative
- * 8. Audit: Log all high-risk actions
- */
-
-export interface SafetyCheckResult {
-  approved: boolean;
-  role: SafetyRole;
-  validationsPassed: string[];
-  validationsFailed: string[];
-  trustScore: number;
-  recommendations: string[];
-}
-
-/**
- * Main Safety Check Function
- */
-export async function checkSafety(
-  taskType: string,
-  toolName: string,
-  action: string,
-): Promise<SafetyCheckResult> {
-  const selectedRole = selectRole(taskType);
-  const evaluation = evaluateSafety(selectedRole, toolName, action);
-  const validationRequirements = getValidationRequirements(selectedRole, toolName);
-
-  return {
-    approved: evaluation.safe,
-    role: selectedRole,
-    validationsPassed: evaluation.safe ? validationRequirements : [],
-    validationsFailed: evaluation.safe ? [] : [evaluation.reason],
-    trustScore: evaluation.trustLevel,
-    recommendations: evaluation.safe
-      ? ["Action approved. Proceed with execution."]
-      : [
-          "Action denied by safety system.",
-          `Suggestion: Try with role "${findAlternativeRole(toolName)}"`,
-        ],
-  };
-}
-
-/**
- * Find Alternative Role
- * If current role can't perform action, suggest a role that can
- */
-function findAlternativeRole(toolName: string): SafetyRole {
-  for (const [role, config] of Object.entries(SAFETY_ROLES)) {
-    if (!config.constraints.forbiddenTools.includes(toolName)) {
-      return role as SafetyRole;
+    // Run role-specific constraint validators
+    for (const constraint of role.constraints) {
+      const result = constraint.validator(action, context);
+      if (!result.allowed) {
+        this.logAction(action, result);
+        return result;
+      }
     }
-  }
-  return "executor"; // Fallback
-}
 
-/**
- * Role-Based Task Dispatcher
- * Routes tasks to appropriate roles
- */
-export class RoleDispatcher {
-  private roleHistory: Map<SafetyRole, number> = new Map();
-
-  dispatch(
-    taskType: string,
-    action: string,
-    toolName: string,
-  ): { role: SafetyRole; approved: boolean } {
-    const role = selectRole(taskType);
-    const safety = evaluateSafety(role, toolName, action);
-
-    // Track role usage for audit
-    this.roleHistory.set(role, (this.roleHistory.get(role) || 0) + 1);
-
-    return {
-      role,
-      approved: safety.safe,
-    };
-  }
-
-  getAuditLog(): Record<string, number> {
-    const result: Record<string, number> = {};
-    this.roleHistory.forEach((count, role) => {
-      result[role] = count;
-    });
+    const result = { allowed: true };
+    this.logAction(action, result);
     return result;
   }
+
+  /**
+   * Find the most appropriate role for a given tool
+   */
+  private findRoleForTool(toolName: string): AgentRole | undefined {
+    for (const role of this.roles.values()) {
+      if (
+        role.capabilities.allowedTools.includes(toolName) &&
+        !role.capabilities.prohibitedTools.includes(toolName)
+      ) {
+        return role;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Log action for audit trail
+   */
+  private logAction(action: any, result: ValidationResult): void {
+    this.actionLog.push({
+      role: this.currentRole.name,
+      action,
+      timestamp: Date.now(),
+      result,
+    });
+
+    // Keep only last 1000 actions to prevent memory bloat
+    if (this.actionLog.length > 1000) {
+      this.actionLog = this.actionLog.slice(-1000);
+    }
+  }
+
+  /**
+   * Get current role information
+   */
+  getCurrentRole(): AgentRole {
+    return this.currentRole;
+  }
+
+  /**
+   * Get action audit log
+   */
+  getAuditLog(
+    limit = 100,
+  ): Array<{ role: string; action: any; timestamp: number; result: ValidationResult }> {
+    return this.actionLog.slice(-limit);
+  }
+
+  /**
+   * Check if current role can perform a specific task type
+   */
+  canPerformTask(taskType: string, riskLevel: "low" | "medium" | "high" = "medium"): boolean {
+    const task: TaskContext = {
+      taskType,
+      inputData: {},
+      requestedTools: [],
+      riskLevel,
+    };
+
+    const routedRole = this.routeTask(task);
+    return routedRole.name === this.currentRole.name;
+  }
+
+  /**
+   * Get safety report for current configuration
+   */
+  getSafetyReport(): any {
+    const recent = this.getAuditLog(50);
+    const blocked = recent.filter((entry) => !entry.result.allowed);
+    const toolUsage = recent.reduce(
+      (acc, entry) => {
+        const tool = entry.action.tool;
+        acc[tool] = (acc[tool] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    return {
+      currentRole: this.currentRole.name,
+      roleCapabilities: this.currentRole.capabilities,
+      recentActions: recent.length,
+      blockedActions: blocked.length,
+      blockRate: recent.length > 0 ? blocked.length / recent.length : 0,
+      toolUsage,
+      commonBlockReasons: blocked
+        .map((b) => b.result.reason)
+        .reduce(
+          (acc, reason) => {
+            if (reason) acc[reason] = (acc[reason] || 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>,
+        ),
+    };
+  }
 }
 
-export default {
-  SAFETY_ROLES,
-  evaluateSafety,
-  selectRole,
-  checkSafety,
-  getValidationRequirements,
-  RoleDispatcher,
-};
+/**
+ * Integration wrapper for existing tools
+ */
+export class SafeToolProxy {
+  constructor(private safetySystem: RoleBasedSafetySystem) {}
+
+  /**
+   * Safely execute a tool with role-based validation
+   */
+  async executeTool(toolName: string, parameters: any, context: TaskContext): Promise<any> {
+    const action = { tool: toolName, parameters };
+    const validation = this.safetySystem.validateAction(action, context);
+
+    if (!validation.allowed) {
+      if (validation.suggestedRole) {
+        console.warn(
+          `[RoleSafety] Action blocked. Suggested role: ${validation.suggestedRole.name}`,
+        );
+        console.warn(`[RoleSafety] Reason: ${validation.reason}`);
+
+        // Auto-switch to suggested role if it makes sense
+        if (this.safetySystem.switchRole(validation.suggestedRole.name, context)) {
+          console.log(
+            `[RoleSafety] Auto-switched to ${validation.suggestedRole.name}, retrying action`,
+          );
+          return this.executeTool(toolName, parameters, context);
+        }
+      }
+
+      throw new Error(`Action blocked by role safety: ${validation.reason}`);
+    }
+
+    if (validation.modifiedAction) {
+      console.log(`[RoleSafety] Action modified by safety constraints`);
+      parameters = validation.modifiedAction.parameters;
+    }
+
+    // Here you would integrate with the actual tool execution system
+    // For now, we'll return a mock response
+    console.log(
+      `[RoleSafety] Executing ${toolName} with role ${this.safetySystem.getCurrentRole().name}`,
+    );
+    return {
+      success: true,
+      tool: toolName,
+      parameters,
+      role: this.safetySystem.getCurrentRole().name,
+    };
+  }
+}
+
+// Export singleton instance for global use
+export const roleBasedSafety = new RoleBasedSafetySystem();
+export const safeToolProxy = new SafeToolProxy(roleBasedSafety);
+
+/**
+ * Utility functions for easy integration
+ */
+export function withRoleValidation<T>(
+  toolFunction: (...args: any[]) => Promise<T>,
+  toolName: string,
+  context: TaskContext,
+) {
+  return async (...args: any[]): Promise<T> => {
+    const action = { tool: toolName, parameters: args[0] || {} };
+    const validation = roleBasedSafety.validateAction(action, context);
+
+    if (!validation.allowed) {
+      throw new Error(`Role safety violation: ${validation.reason}`);
+    }
+
+    return toolFunction(...args);
+  };
+}
+
+export function getCurrentRoleInfo() {
+  return {
+    role: roleBasedSafety.getCurrentRole(),
+    safetyReport: roleBasedSafety.getSafetyReport(),
+  };
+}

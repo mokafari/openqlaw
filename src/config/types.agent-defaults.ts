@@ -209,6 +209,29 @@ export type AgentDefaultsConfig = {
     /** Default thinking level for spawned sub-agents (e.g. "off", "low", "medium", "high"). */
     thinking?: string;
   };
+  /** Research features (role-safety, test-time-scaling, share-framework). */
+  research?: {
+    /** Enable research integrations. Default: false. */
+    enabled?: boolean;
+    /** Role-based safety constraints. */
+    roleSafety?: {
+      enabled?: boolean;
+      defaultRole?: string;
+      strictMode?: boolean;
+    };
+    /** Test-time scaling for complex queries. */
+    testTimeScaling?: {
+      enabled?: boolean;
+      maxPaths?: number;
+      qualityTarget?: number;
+      complexityThreshold?: number;
+    };
+    /** Share Framework subspace routing. */
+    shareFramework?: {
+      enabled?: boolean;
+      logRouting?: boolean;
+    };
+  };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: {
     /** Enable sandboxing for sessions. */

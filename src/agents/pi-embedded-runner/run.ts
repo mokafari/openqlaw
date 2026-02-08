@@ -105,6 +105,29 @@ export async function runEmbeddedPiAgent(
         }
       }
 
+      // Research integration: role-safety, test-time-scaling, share-framework
+      if (params.config?.agents?.research?.enabled && !isProbeSession) {
+        try {
+          const { getGlobalResearchIntegration } =
+            await import("../evolution/research-integration.js");
+          const research = getGlobalResearchIntegration();
+          const validation = await research.validateAndRoute({
+            sessionId: params.sessionId,
+            userMessage: params.commandBody,
+            taskType: params.sessionKey?.includes("browser") ? "browser" : "general",
+            requestedTools: [], // Will be populated from tool calls later
+          });
+          if (!validation.allowed) {
+            log.warn(`[Research] Validation failed: ${validation.validationErrors?.join(", ")}`);
+          }
+          if (validation.suggestions?.length) {
+            log.info(`[Research] Suggestions: ${validation.suggestions.join("; ")}`);
+          }
+        } catch {
+          // Research integration not available or failed - ignore
+        }
+      }
+
       const resolvedWorkspace = resolveUserPath(params.workspaceDir);
       const prevCwd = process.cwd();
 
