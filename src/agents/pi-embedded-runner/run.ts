@@ -138,14 +138,17 @@ export async function runEmbeddedPiAgent(
             taskType: params.sessionKey?.includes("browser") ? "browser" : "general",
             requestedTools: [], // Will be populated from tool calls later
           });
+          log.info(
+            `[Research] Routed to subspace=${validation.subspace} role=${validation.role?.name ?? "default"}`,
+          );
           if (!validation.allowed) {
             log.warn(`[Research] Validation failed: ${validation.validationErrors?.join(", ")}`);
           }
           if (validation.suggestions?.length) {
             log.info(`[Research] Suggestions: ${validation.suggestions.join("; ")}`);
           }
-        } catch {
-          // Research integration not available or failed - ignore
+        } catch (err) {
+          log.warn(`[Research] Integration error: ${err instanceof Error ? err.message : err}`);
         }
       }
 
