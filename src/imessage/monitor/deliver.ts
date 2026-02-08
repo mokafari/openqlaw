@@ -1,6 +1,7 @@
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import type { createIMessageRpcClient } from "../client.js";
+import { getEchoDetector } from "../../agents/echo-detector.js";
 import { chunkTextWithMode, resolveChunkMode } from "../../auto-reply/chunk.js";
 import { loadConfig } from "../../config/config.js";
 import { resolveMarkdownTableMode } from "../../config/markdown-tables.js";
@@ -38,6 +39,7 @@ export async function deliverReplies(params: {
     if (!text && mediaList.length === 0) {
       continue;
     }
+    const echoDetector = getEchoDetector();
     if (mediaList.length === 0) {
       sentMessageCache?.remember(scope, text);
       for (const chunk of chunkTextWithMode(text, textLimit, chunkMode)) {
@@ -47,6 +49,8 @@ export async function deliverReplies(params: {
           accountId,
         });
         sentMessageCache?.remember(scope, chunk);
+        // Record for global echo detection (catches Messages.app duplicates)
+        echoDetector.recordOutgoing(chunk, target);
       }
     } else {
       let first = true;
@@ -61,7 +65,15 @@ export async function deliverReplies(params: {
         });
         if (caption) {
           sentMessageCache?.remember(scope, caption);
+          echoDetector.recordOutgoing(caption, target);
         }
+        // Record media placeholder for audio/image echoes
+        const ext = url.split(".").pop()?.toLowerCase() ?? "";
+        const isAudio = ["mp3", "m4a", "wav", "ogg", "aac", "caf"].includes(ext);
+        const isImage = ["jpg", "jpeg", "png", "gif", "webp", "heic"].includes(ext);
+        const isVideo = ["mp4", "mov", "avi", "mkv"].includes(ext);
+        const kind = isAudio ? "audio" : isImage ? "image" : isVideo ? "video" : "attachment";
+        echoDetector.recordOutgoing(`<media:${kind}>`, target);
       }
     }
     runtime.log?.(`imessage: delivered reply to ${target}`);
