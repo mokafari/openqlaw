@@ -1,10 +1,17 @@
 import { Type } from "@sinclair/typebox";
+import { execSync } from "node:child_process";
 import path from "node:path";
 import type { AnyAgentTool } from "./common.js";
 import { resolveStateDir } from "../../config/paths.js";
 import { runDojoTask, DOJO_TASKS } from "../evolution/dojo.js";
 import { loadGenotype } from "../evolution/genotype.js";
-import { savePatch, loadPatch, updatePatchStatus, listPatches } from "../evolution/patches.js";
+import {
+  savePatch,
+  loadPatch,
+  updatePatchStatus,
+  listPatches,
+  applyApprovedPatchToCodebase,
+} from "../evolution/patches.js";
 import {
   loadSelfModificationPolicy,
   validatePatch,
@@ -250,6 +257,164 @@ export function createEvolutionListPatchesTool(opts?: EvolutionToolOptions): Any
           message: `Found ${patches.length} patch(es)${status ? ` with status ${status}` : ""}`,
           patches: limited,
           total: patches.length,
+        });
+      } catch (err) {
+        return jsonResult({
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  };
+}
+
+/**
+ * Tool to apply an approved patch to the codebase.
+ * Handles the full deployment workflow: apply patch, build, commit, push, restart.
+ */
+export function createEvolutionApplyApprovedPatchTool(opts?: EvolutionToolOptions): AnyAgentTool {
+  return {
+    label: "Evolution: Apply Approved Patch",
+    name: "evolution_apply_approved_patch",
+    description:
+      "Apply an approved evolution patch to source files, then build, commit, push, and restart. Handles the full deployment workflow for patches that passed Dojo validation.",
+    parameters: Type.Object({
+      patchId: Type.String({
+        description: "The patch ID to apply (e.g., 'c54c2f9e-1cd7-4575-84bb-0100883c3aab')",
+      }),
+      skipRestart: Type.Optional(
+        Type.Boolean({
+          description:
+            "Skip gateway restart after applying (useful when batching multiple patches)",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, args) => {
+      const params = args as Record<string, unknown>;
+      const patchId = readStringParam(params, "patchId", { required: true });
+      const skipRestart = params.skipRestart === true;
+
+      // Resolve workspace directory (OpenClaw source repo)
+      const workspaceDir = opts?.workspaceDir ?? "/Users/gustav/openclaw";
+
+      try {
+        // 1. Load and validate patch
+        const patch = await loadPatch(patchId);
+        if (!patch) {
+          return jsonResult({
+            status: "error",
+            error: `Patch ${patchId} not found`,
+          });
+        }
+
+        // Check patch status
+        if (patch.metadata.status !== "pending" && patch.metadata.status !== "applied") {
+          return jsonResult({
+            status: "error",
+            error: `Patch ${patchId} has status "${patch.metadata.status}" (must be pending or applied)`,
+          });
+        }
+
+        // Check Dojo validation (unless already applied)
+        if (patch.metadata.status === "pending" && !patch.metadata.dojoResult?.success) {
+          return jsonResult({
+            status: "error",
+            error: `Patch ${patchId} did not pass Dojo validation. Run evolution_run_dojo_test first.`,
+          });
+        }
+
+        // 2. Apply patch to codebase
+        const applyResult = await applyApprovedPatchToCodebase(patchId, workspaceDir);
+
+        if (!applyResult.success) {
+          return jsonResult({
+            status: "error",
+            error: `Failed to apply patch: ${applyResult.error}`,
+            conflicts: applyResult.conflicts,
+          });
+        }
+
+        // 3. Build
+        let buildOutput: string;
+        try {
+          buildOutput = execSync("pnpm build 2>&1", {
+            cwd: workspaceDir,
+            encoding: "utf-8",
+            timeout: 120_000,
+          });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          return jsonResult({
+            status: "error",
+            error: `Build failed: ${error}`,
+            phase: "build",
+            patchApplied: true,
+          });
+        }
+
+        // 4. Commit
+        let committed = false;
+        try {
+          const commitMsg = `feat(evolution): apply approved patch ${patchId.slice(0, 8)}
+
+${patch.metadata.rationale}
+
+Fitness: ${patch.metadata.dojoResult?.fitness?.toFixed(3) ?? "N/A"}
+Patch ID: ${patchId}`;
+
+          execSync(`git add -A && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
+            cwd: workspaceDir,
+            stdio: "pipe",
+            encoding: "utf-8",
+            timeout: 30_000,
+          });
+          committed = true;
+        } catch {
+          // Commit may fail if nothing changed (already applied)
+        }
+
+        // 5. Push
+        let pushed = false;
+        try {
+          execSync("git push origin dev", {
+            cwd: workspaceDir,
+            stdio: "pipe",
+            encoding: "utf-8",
+            timeout: 30_000,
+          });
+          pushed = true;
+        } catch {
+          // Push may fail if not on dev branch or no remote
+        }
+
+        // 6. Restart gateway (unless skipped)
+        let restarted = false;
+        if (!skipRestart) {
+          try {
+            execSync(`launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway`, {
+              cwd: workspaceDir,
+              stdio: "pipe",
+              encoding: "utf-8",
+              timeout: 10_000,
+            });
+            restarted = true;
+          } catch {
+            // Restart may fail on non-macOS or if service not installed
+          }
+        }
+
+        return jsonResult({
+          status: "ok",
+          message: `Patch ${patchId.slice(0, 8)} successfully applied!`,
+          patchId,
+          phases: {
+            applied: true,
+            built: true,
+            committed,
+            pushed,
+            restarted: skipRestart ? "skipped" : restarted,
+          },
+          buildOutput: buildOutput.split("\n").slice(-5).join("\n"),
         });
       } catch (err) {
         return jsonResult({

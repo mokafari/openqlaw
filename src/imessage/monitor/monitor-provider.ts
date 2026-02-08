@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import type { IMessagePayload, MonitorIMessageOpts } from "./types.js";
+import { getEchoDetector } from "../../agents/echo-detector.js";
 import { resolveHumanDelayConfig } from "../../agents/identity.js";
 import { resolveTextChunkLimit } from "../../auto-reply/chunk.js";
 import { hasControlCommand } from "../../auto-reply/command-detection.js";
@@ -438,9 +439,21 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     const mentionRegexes = buildMentionRegexes(cfg, route.agentId);
     const messageText = (message.text ?? "").trim();
 
-    // Echo detection: check if the received message matches a recently sent message (within 5 seconds).
+    // Echo detection: check if the received message matches a recently sent message.
     // Scope by conversation so same text in different chats is not conflated.
     const echoScope = `${accountInfo.accountId}:${isGroup ? formatIMessageChatTarget(chatId) : `imessage:${sender}`}`;
+
+    // Global echo detection: catches messages sent via the message tool (outbound path)
+    // which are not tracked by the local sentMessageCache
+    const globalEcho = getEchoDetector().detectEcho(messageText, echoScope);
+    if (globalEcho.isEcho) {
+      logVerbose(
+        `imessage: skipping echo (global detector): "${truncateUtf16Safe(messageText, 50)}" - ${globalEcho.reason ?? "matched"}`,
+      );
+      return;
+    }
+
+    // Local echo detection: catches messages sent via reply dispatcher (within 5s)
     if (messageText && sentMessageCache.has(echoScope, messageText)) {
       logVerbose(
         `imessage: skipping echo message (matches recently sent text within 5s): "${truncateUtf16Safe(messageText, 50)}"`,

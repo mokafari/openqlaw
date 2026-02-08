@@ -8,6 +8,7 @@ import type { sendMessageTelegram } from "../../telegram/send.js";
 import type { sendMessageWhatsApp } from "../../web/outbound.js";
 import type { NormalizedOutboundPayload } from "./payloads.js";
 import type { OutboundChannel } from "./targets.js";
+import { getEchoDetector } from "../../agents/echo-detector.js";
 import {
   chunkByParagraph,
   chunkMarkdownTextWithMode,
@@ -371,5 +372,17 @@ export async function deliverOutboundPayloads(params: {
       });
     }
   }
+
+  // Record outgoing messages for echo detection
+  // This prevents messages sent via the message tool from echoing back as user input
+  if (results.length > 0) {
+    const echoDetector = getEchoDetector();
+    for (const payload of normalizedPayloads) {
+      if (payload.text) {
+        echoDetector.recordOutgoing(payload.text, to);
+      }
+    }
+  }
+
   return results;
 }

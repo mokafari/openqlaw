@@ -19,6 +19,7 @@ import {
   createEvolutionProposePatchTool,
   createEvolutionRunDojoTestTool,
   createEvolutionListPatchesTool,
+  createEvolutionApplyApprovedPatchTool,
 } from "./tools/evolution-tools.js";
 import { createGatewayRebuildTool } from "./tools/gateway-rebuild-tool.js";
 import { createGatewayTool } from "./tools/gateway-tool.js";
@@ -204,6 +205,10 @@ export function createOpenClawTools(options?: {
       }),
       createEvolutionListPatchesTool({
         sessionKey: options?.agentSessionKey,
+      }),
+      createEvolutionApplyApprovedPatchTool({
+        sessionKey: options?.agentSessionKey,
+        workspaceDir: options?.workspaceDir,
       }),
       createMetaLearningTool(),
       createSessionDiffTool(),
