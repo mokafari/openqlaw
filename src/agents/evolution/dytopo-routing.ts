@@ -90,26 +90,6 @@ function keywordSimilarity(query: string, key: string): number {
 }
 
 /**
- * Compute cosine similarity between two vectors
- */
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-/**
  * DyTopo Router - manages dynamic multi-agent topology
  */
 export class DyTopoRouter {
@@ -351,43 +331,4 @@ Please provide brief descriptors for routing:
  */
 export function createDyTopoRouter(config?: Partial<DyTopoConfig>): DyTopoRouter {
   return new DyTopoRouter(config);
-}
-
-/**
- * Integration helper: wrap subagent spawning with DyTopo routing
- */
-export interface DyTopoOrchestration {
-  router: DyTopoRouter;
-  currentRound: number;
-  roundGoal: string;
-  agentDescriptors: AgentDescriptor[];
-}
-
-export function initializeOrchestration(
-  roundGoal: string,
-  config?: Partial<DyTopoConfig>,
-): DyTopoOrchestration {
-  return {
-    router: createDyTopoRouter(config),
-    currentRound: 0,
-    roundGoal,
-    agentDescriptors: [],
-  };
-}
-
-export function advanceRound(
-  orchestration: DyTopoOrchestration,
-  newGoal: string,
-): CommunicationGraph {
-  const graph = orchestration.router.induceTopology(
-    orchestration.currentRound,
-    orchestration.roundGoal,
-    orchestration.agentDescriptors,
-  );
-
-  orchestration.currentRound++;
-  orchestration.roundGoal = newGoal;
-  orchestration.agentDescriptors = []; // Reset for next round
-
-  return graph;
 }

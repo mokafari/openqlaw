@@ -121,11 +121,11 @@ Keep the same behavior.`,
 
 Create a file called \`math.ts\`:
 \`\`\`typescript
-export function add(a: number, b: number): number {
+function add(a: number, b: number): number {
   return a + b;
 }
 
-export function multiply(a: number, b: number): number {
+function multiply(a: number, b: number): number {
   return a * b;
 }
 \`\`\`
