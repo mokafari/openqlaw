@@ -7,6 +7,11 @@ import { createMetaLearningTool } from "./evolution/meta-learning-tool.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
 import { createBrowserTool } from "./tools/browser-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
+import {
+  createComposeToolTool,
+  createExecuteComposedTool,
+  createListComposedToolsTool,
+} from "./tools/compose-tool.js";
 import { createCronTool } from "./tools/cron-tool.js";
 import { getGlobalDynamicRegistry } from "./tools/dynamic-registry.js";
 import {
@@ -185,6 +190,9 @@ export function createOpenClawTools(options?: {
     createGoalUnblockTool({
       agentSessionKey: options?.agentSessionKey,
     }),
+    // Tool composition
+    createComposeToolTool(),
+    createListComposedToolsTool(),
     ...(webSearchTool ? [webSearchTool] : []),
     ...(webFetchTool ? [webFetchTool] : []),
     ...(imageTool ? [imageTool] : []),
