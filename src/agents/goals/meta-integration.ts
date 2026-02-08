@@ -13,6 +13,7 @@
 
 import type { Goal, GoalType } from "./types.js";
 import { MetaLearningSystem } from "../evolution/meta-learning.js";
+import { logNovelty, logBreakthrough, detectBreakthrough } from "../meta/emergence-metrics.js";
 import { log } from "../pi-embedded-runner/logger.js";
 
 export type GoalPrediction = {
@@ -217,6 +218,49 @@ export async function logGoalOutcome(goal: Goal): Promise<void> {
   log.debug(
     `[goal-meta] Logged outcome for goal ${goal.id}: success=${actualSuccess}, duration=${Math.round(actualDurationMs / 1000 / 60)}min`,
   );
+
+  // Track emergence metrics for successful goals
+  if (actualSuccess) {
+    const taskType = extractGoalTaskType(goal.description);
+
+    // Check for capability breakthrough
+    try {
+      const calibration = await metaLearning.getCalibrationMetrics(taskType);
+      if (calibration && calibration.predictionCount >= 5) {
+        const successRate = calibration.actualSuccessRate;
+        const breakthrough = await detectBreakthrough(
+          `goal_${taskType}`,
+          successRate,
+          0.1, // 10% improvement threshold
+        );
+
+        if (breakthrough.isBreakthrough) {
+          await logBreakthrough(
+            `goal_${taskType}`,
+            breakthrough.previousLevel,
+            successRate,
+            `Improved from ${(breakthrough.previousLevel * 100).toFixed(0)}% to ${(successRate * 100).toFixed(0)}% success on ${taskType} tasks`,
+            successRate - breakthrough.previousLevel >= 0.2 ? "major" : "moderate",
+          );
+          log.debug(
+            `[goal-meta] Breakthrough detected: ${taskType} success rate improved to ${(successRate * 100).toFixed(0)}%`,
+          );
+        }
+      }
+
+      // Log novelty for complex or cross-domain goals
+      if (goal.type === "subgoal" && goal.description.includes(" and ")) {
+        await logNovelty(
+          "cross_domain",
+          `Multi-domain goal completed: ${goal.description.slice(0, 100)}`,
+          0.7,
+          taskType,
+        );
+      }
+    } catch (err) {
+      log.debug(`[goal-meta] Failed to check emergence metrics: ${err}`);
+    }
+  }
 }
 
 /**

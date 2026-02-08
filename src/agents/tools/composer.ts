@@ -319,3 +319,91 @@ export function deleteComposedTool(id: string): boolean {
 export function reset(): void {
   composedTools.clear();
 }
+
+// Execute a composition with custom executors (for integration with agent tools)
+export async function executeComposition(
+  composition: ComposedTool,
+  executors: Map<string, (params: Record<string, unknown>) => Promise<unknown>>,
+  initialInput?: Record<string, unknown>,
+): Promise<CompositionResult> {
+  const startTime = Date.now();
+  const context: Record<string, unknown> = { input: initialInput, ...initialInput };
+  const stepResults: CompositionResult["stepResults"] = [];
+
+  for (let i = 0; i < composition.steps.length; i++) {
+    const step = composition.steps[i];
+    const stepStart = Date.now();
+
+    // Check condition
+    if (step.condition && !evaluateCondition(step.condition, context)) {
+      stepResults.push({
+        step: i + 1,
+        tool: step.tool,
+        success: true,
+        output: "skipped (condition not met)",
+        durationMs: 0,
+      });
+      continue;
+    }
+
+    // Get executor from provided map or registry
+    const executor = executors.get(step.tool) || toolRegistry.get(step.tool);
+    if (!executor) {
+      stepResults.push({
+        step: i + 1,
+        tool: step.tool,
+        success: false,
+        error: `Tool '${step.tool}' not available`,
+        durationMs: Date.now() - stepStart,
+      });
+
+      return {
+        success: false,
+        outputs: context,
+        stepResults,
+        totalDurationMs: Date.now() - startTime,
+      };
+    }
+
+    // Execute step
+    try {
+      const resolvedParams = resolveParams(step.params, context);
+      const output = await executor(resolvedParams);
+
+      if (step.outputAs) {
+        context[step.outputAs] = output;
+      }
+
+      stepResults.push({
+        step: i + 1,
+        tool: step.tool,
+        success: true,
+        output,
+        durationMs: Date.now() - stepStart,
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      stepResults.push({
+        step: i + 1,
+        tool: step.tool,
+        success: false,
+        error: errorMessage,
+        durationMs: Date.now() - stepStart,
+      });
+
+      return {
+        success: false,
+        outputs: context,
+        stepResults,
+        totalDurationMs: Date.now() - startTime,
+      };
+    }
+  }
+
+  return {
+    success: true,
+    outputs: context,
+    stepResults,
+    totalDurationMs: Date.now() - startTime,
+  };
+}

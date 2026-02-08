@@ -14,6 +14,12 @@ import {
   type PatchConflict,
   type PatchApplicationResult,
 } from "./patch-parser-advanced.js";
+import {
+  verifyPatch,
+  logVerification,
+  summarizeVerification,
+  type PatchVerification,
+} from "./patch-verifier.js";
 
 export type PatchStatus = "pending" | "applied" | "reverted" | "failed";
 
@@ -132,7 +138,9 @@ export async function updatePatchStatus(
 ): Promise<void> {
   const patch = await loadPatch(patchId);
   if (!patch) {
-    const searchedDirs = ["pending", "applied", "reverted", "failed"].map((s) => getPatchDir(s));
+    const searchedDirs = (["pending", "applied", "reverted", "failed"] as PatchStatus[]).map((s) =>
+      getPatchDir(s),
+    );
     throw new NotFoundError("Patch", patchId, searchedDirs);
   }
 
@@ -718,3 +726,69 @@ export async function dryRunPatch(
 
 // Re-export types from advanced parser for consumers
 export type { ParsedPatch, PatchConflict, PatchApplicationResult };
+
+/**
+ * Apply a patch with full verification pipeline:
+ * 1. Create git snapshot for rollback
+ * 2. Apply the patch
+ * 3. Run build verification
+ * 4. Run TypeScript type check
+ * 5. Auto-rollback on any failure
+ *
+ * This is the safest way to apply self-modifications.
+ */
+export async function applyPatchWithVerification(
+  patchId: string,
+  workspaceDir: string,
+  options?: {
+    fuzzyMatch?: boolean;
+    maxFuzzyOffset?: number;
+    skipTests?: boolean;
+    skipTypeCheck?: boolean;
+  },
+): Promise<{
+  success: boolean;
+  verification: PatchVerification;
+  summary: string;
+  error?: string;
+}> {
+  log.debug(`[patches] Starting verified patch application for ${patchId}`);
+
+  // Create the patch application function to pass to verifier
+  const applyFn = async () => {
+    const result = await applyPatchToCodebase(patchId, workspaceDir, {
+      fuzzyMatch: options?.fuzzyMatch ?? true,
+      maxFuzzyOffset: options?.maxFuzzyOffset ?? 30,
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "Patch application failed");
+    }
+  };
+
+  // Run the full verification pipeline
+  const verification = await verifyPatch(patchId, applyFn, {
+    skipTests: options?.skipTests ?? true,
+    skipTypeCheck: options?.skipTypeCheck ?? false,
+  });
+
+  // Log the verification result
+  await logVerification(verification);
+
+  // Generate summary
+  const summary = summarizeVerification(verification);
+  log.debug(`[patches] Verification complete:\n${summary}`);
+
+  return {
+    success: verification.finalStatus === "success",
+    verification,
+    summary,
+    error:
+      verification.finalStatus !== "success"
+        ? verification.results.find((r) => !r.success)?.error
+        : undefined,
+  };
+}
+
+// Re-export verification types
+export type { PatchVerification };
