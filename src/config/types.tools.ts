@@ -512,6 +512,23 @@ export type ToolsConfig = {
       /** Minimum fitness score for pattern recall (default: 0.7). */
       minFitnessForRecall?: number;
     };
+    /** Evolution daemon configuration for continuous fitness monitoring. */
+    daemon?: {
+      /** Enable evolution daemon (default: true). */
+      enabled?: boolean;
+      /** Check interval in milliseconds (default: 3600000 = 1 hour). */
+      checkIntervalMs?: number;
+      /** Fitness degradation threshold for triggering evolution (default: 0.1 = 10%). */
+      fitnessDegradationThreshold?: number;
+      /** Error rate threshold for triggering evolution (default: 0.2 = 20%). */
+      errorRateThreshold?: number;
+      /** Minimum sessions required before evolution trigger (default: 10). */
+      minSessionsForEvolution?: number;
+      /** Auto-trigger mutation when thresholds exceeded (default: true). */
+      autoMutate?: boolean;
+      /** Directory for storing fitness stats (default: ~/.openclaw/evolution/stats). */
+      statsDir?: string;
+    };
     /** Episodic knowledge graph memory — cross-session structured recall. */
     episodic?: {
       /** Enable episodic memory and knowledge graph (default: false). */
