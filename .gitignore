@@ -74,3 +74,13 @@ USER.md
 
 # Agent memory files (should be in workspace, not repo)
 memory/
+
+# Runtime data directories (should be in workspace or state dir, not repo)
+.prose/
+tmp/
+cache/
+logs/
+*.log
+*.db
+*.sqlite
+*.cache
