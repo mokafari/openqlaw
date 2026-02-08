@@ -27,6 +27,8 @@ export async function logAgentRunTelemetry(params: {
   toolMetas: Array<{ toolName: string; meta?: string }>;
   toolErrors?: Array<{ toolName: string; error: string; timestamp: number }>;
   statsDir?: string;
+  /** Optional: Agent workspace directory for reflexion logging */
+  workspaceDir?: string;
   /** Optional: Provide initial/final goals for satisfaction derivation */
   goals?: { initial: Goal[]; final: Goal[] };
   /** Optional: Explicit user satisfaction (0.0-1.0). If not provided, auto-derived. */
@@ -115,6 +117,7 @@ export async function logAgentRunTelemetry(params: {
       userSatisfaction,
       contextText: params.contextText,
       goals: params.goals,
+      workspaceDir: params.workspaceDir,
     });
   } catch (err) {
     // Don't fail agent runs if telemetry fails
@@ -135,9 +138,10 @@ async function logReflexionEpisode(params: {
   userSatisfaction: number;
   contextText?: string;
   goals?: { initial: Goal[]; final: Goal[] };
+  workspaceDir?: string;
 }): Promise<void> {
   try {
-    const reflexion = getReflexionSystem();
+    const reflexion = getReflexionSystem(params.workspaceDir);
 
     // Build trajectory from tool calls
     const trajectory: TrajectoryStep[] = params.toolMetas.map((tool, index) => ({

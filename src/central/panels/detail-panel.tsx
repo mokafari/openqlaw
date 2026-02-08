@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import type { RunInfo, ToolCall } from "../types.js";
 import { LOBSTER_PALETTE } from "../../terminal/palette.js";
-import { useDashboard } from "../store.js";
+import { buildFlatRunTree, useDashboard } from "../store.js";
 
 function formatDuration(startedAt: number, endedAt?: number): string {
   const end = endedAt ?? Date.now();
@@ -99,6 +99,12 @@ function RunDetail({ run }: { run: RunInfo }) {
       <Box>
         <Text dimColor>runId: {run.runId.slice(0, 12)}…</Text>
       </Box>
+      {run.spawnedBy && (
+        <Box>
+          <Text dimColor>spawned by: </Text>
+          <Text color={LOBSTER_PALETTE.accent}>{run.spawnedBy}</Text>
+        </Box>
+      )}
 
       {/* Error */}
       {run.errorMessage && (
@@ -156,7 +162,7 @@ export function DetailPanel() {
   return <RunDetail run={run} />;
 }
 
-/** Map the flat runsSelectedIndex to the actual RunInfo (skipping agent headers). */
+/** Map the flat runsSelectedIndex to the actual RunInfo using the same tree ordering as RunsPanel. */
 function getFlatRun(
   runs: RunInfo[],
   selectedIndex: number,
@@ -169,7 +175,8 @@ function getFlatRun(
   let idx = 0;
   for (const agentId of agentIds) {
     const agentRuns = runs.filter((r) => r.agentId === agentId);
-    for (const run of agentRuns) {
+    const flatTree = buildFlatRunTree(agentRuns);
+    for (const { run } of flatTree) {
       if (idx === selectedIndex) {
         return run;
       }

@@ -761,6 +761,7 @@ export async function runEmbeddedPiAgent(
               agentMeta,
               toolMetas: attempt.toolMetas,
               toolErrors: attempt.toolErrors,
+              workspaceDir: params.workspaceDir,
               // Pass goals for auto-satisfaction derivation
               goals: finalGoals
                 ? {

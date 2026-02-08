@@ -55,6 +55,42 @@ function agentFromSession(sessionKey: string): string {
   return colon > 0 ? sessionKey.slice(0, colon) : sessionKey;
 }
 
+// ── Shared tree-building for runs panel + detail panel ───────────────
+export type FlatRunEntry = { run: RunInfo; depth: number; childCount: number };
+
+export function buildFlatRunTree(runs: RunInfo[]): FlatRunEntry[] {
+  const result: FlatRunEntry[] = [];
+  const childByParent = new Map<string, RunInfo[]>();
+  for (const run of runs) {
+    if (run.spawnedBy) {
+      const existing = childByParent.get(run.spawnedBy) ?? [];
+      existing.push(run);
+      childByParent.set(run.spawnedBy, existing);
+    }
+  }
+  const childRunIds = new Set<string>();
+  for (const children of childByParent.values()) {
+    for (const child of children) {
+      childRunIds.add(child.runId);
+    }
+  }
+
+  function addRun(run: RunInfo, depth: number) {
+    const children = childByParent.get(run.sessionKey) ?? [];
+    result.push({ run, depth, childCount: children.length });
+    for (const child of children) {
+      addRun(child, depth + 1);
+    }
+  }
+
+  for (const run of runs) {
+    if (!childRunIds.has(run.runId)) {
+      addRun(run, 0);
+    }
+  }
+  return result;
+}
+
 // ── Run tracking from agent events ───────────────────────────────────
 function processAgentEventForRuns(
   runs: RunInfo[],
@@ -130,7 +166,16 @@ function processAgentEventForRuns(
     const args =
       typeof data.args === "object" && data.args ? (data.args as Record<string, unknown>) : {};
     const tool: ToolCall = { toolCallId, name, args, startedAt: Date.now() };
-    const newRuns = runs.map((r) => (r.runId === runId ? { ...r, tools: [...r.tools, tool] } : r));
+    const newRuns = runs.map((r) => {
+      if (r.runId !== runId) {
+        return r;
+      }
+      // Deduplicate: skip if toolCallId already tracked (monitoring + targeted broadcasts overlap)
+      if (toolCallId && r.tools.some((t) => t.toolCallId === toolCallId)) {
+        return r;
+      }
+      return { ...r, tools: [...r.tools, tool] };
+    });
     return { runs: newRuns, agents };
   }
 
@@ -182,8 +227,21 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
     case "SET_AGENTS":
       return { ...state, agents: mergeAgents(state.agents, action.agents) };
 
-    case "SET_SESSIONS":
-      return { ...state, sessions: action.sessions };
+    case "SET_SESSIONS": {
+      // Enrich existing runs with spawnedBy from session data.
+      const sessionByKey = new Map(action.sessions.map((s) => [s.key, s]));
+      const enrichedRuns = state.runs.map((r) => {
+        if (r.spawnedBy) {
+          return r;
+        }
+        const session = sessionByKey.get(r.sessionKey);
+        if (session?.spawnedBy) {
+          return { ...r, spawnedBy: session.spawnedBy };
+        }
+        return r;
+      });
+      return { ...state, sessions: action.sessions, runs: enrichedRuns };
+    }
 
     case "SET_HEALTH":
       return { ...state, health: action.health };

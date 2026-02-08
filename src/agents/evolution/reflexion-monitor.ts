@@ -22,9 +22,9 @@ export type ReflexionStatusReport = {
  * Check reflexion status for heartbeat monitoring.
  * Returns current failure patterns and alerts if thresholds are exceeded.
  */
-export async function checkReflexionStatus(): Promise<ReflexionStatusReport> {
+export async function checkReflexionStatus(workspaceDir?: string): Promise<ReflexionStatusReport> {
   try {
-    const reflexion = getReflexionSystem();
+    const reflexion = getReflexionSystem(workspaceDir);
 
     // Get failure pattern analysis
     const analysis = await reflexion.analyzeFailurePatterns();
@@ -90,13 +90,13 @@ export async function checkReflexionStatus(): Promise<ReflexionStatusReport> {
  * Generate reflexion insights for system prompts or diagnostic context.
  * Returns recent lessons and improvement suggestions.
  */
-export async function getReflexionInsights(): Promise<{
+export async function getReflexionInsights(workspaceDir?: string): Promise<{
   lessons: string[];
   suggestions: string[];
   criticalPatterns: string[];
 }> {
   try {
-    const reflexion = getReflexionSystem();
+    const reflexion = getReflexionSystem(workspaceDir);
 
     const analysis = await reflexion.analyzeFailurePatterns();
     const suggestions = await reflexion.generateImprovementSuggestions();

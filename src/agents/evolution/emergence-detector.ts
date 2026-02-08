@@ -13,6 +13,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { log } from "../pi-embedded-runner/logger.js";
+import { DEFAULT_AGENT_WORKSPACE_DIR } from "../workspace.js";
 
 export type EmergenceType =
   | "spontaneous-curiosity"
@@ -258,8 +259,9 @@ const SIGNAL_PATTERNS: Array<{
 export class EmergenceDetector {
   private emergenceLogPath: string;
 
-  constructor(workspacePath: string = process.env.WORKSPACE_ROOT || process.cwd()) {
-    this.emergenceLogPath = path.join(workspacePath, "memory", "emergence-log.jsonl");
+  constructor(workspacePath?: string) {
+    const resolvedWorkspacePath = workspacePath || DEFAULT_AGENT_WORKSPACE_DIR;
+    this.emergenceLogPath = path.join(resolvedWorkspacePath, "memory", "emergence-log.jsonl");
   }
 
   /**

@@ -128,6 +128,19 @@ export function clearActiveEmbeddedRun(sessionId: string, handle: EmbeddedPiQueu
   if (ACTIVE_EMBEDDED_RUNS.get(sessionId) === handle) {
     ACTIVE_EMBEDDED_RUNS.delete(sessionId);
     logSessionStateChange({ sessionId, state: "idle", reason: "run_completed" });
+
+    // Wire reflexion episode logging
+    void (async () => {
+      try {
+        const { getReflexionSystem } = await import("../evolution/reflexion.js");
+        const reflexion = getReflexionSystem();
+        // Log episode will be enhanced with richer context in future iterations
+        reflexion.logEpisode?.({ id: sessionId, timestamp: new Date().toISOString() });
+      } catch (err) {
+        // Reflexion logging is non-critical
+      }
+    })();
+
     if (!sessionId.startsWith("probe-")) {
       diag.debug(`run cleared: sessionId=${sessionId} totalActive=${ACTIVE_EMBEDDED_RUNS.size}`);
     }

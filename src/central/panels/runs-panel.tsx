@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import type { RunInfo } from "../types.js";
 import { LOBSTER_PALETTE } from "../../terminal/palette.js";
-import { useDashboard } from "../store.js";
+import { buildFlatRunTree, useDashboard } from "../store.js";
 
 function statusColor(status: RunInfo["status"]): string {
   if (status === "running") {
@@ -50,6 +50,49 @@ function toolSummary(run: RunInfo): string {
   return parts.join(", ");
 }
 
+function sessionLabel(sessionKey: string): string {
+  return sessionKey.split(":")[1] ?? sessionKey;
+}
+
+function RunRow({
+  run,
+  selected,
+  depth,
+  childCount,
+}: {
+  run: RunInfo;
+  selected: boolean;
+  depth: number;
+  childCount: number;
+}) {
+  const indent = depth * 2;
+  const prefix = depth > 0 ? "└─" : "";
+  return (
+    <Box key={run.runId} flexDirection="column" paddingLeft={2 + indent}>
+      <Box>
+        <Text color={selected ? LOBSTER_PALETTE.accentBright : undefined} bold={selected}>
+          {selected ? "▸ " : "  "}
+        </Text>
+        {prefix && <Text dimColor>{prefix}</Text>}
+        <Text color={statusColor(run.status)}>{statusIcon(run.status)} </Text>
+        <Text color={selected ? LOBSTER_PALETTE.accentBright : undefined}>
+          {sessionLabel(run.sessionKey)}
+        </Text>
+        <Text dimColor>
+          {" "}
+          {formatDuration(run.startedAt, run.endedAt)} · {toolSummary(run)}
+        </Text>
+        {childCount > 0 && <Text color={LOBSTER_PALETTE.accent}> [{childCount} sub]</Text>}
+      </Box>
+      {run.errorMessage && (
+        <Box paddingLeft={6 + indent}>
+          <Text color={LOBSTER_PALETTE.error}>{run.errorMessage.slice(0, 80)}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function RunsPanel() {
   const { state } = useDashboard();
   const { runs, runsSelectedIndex, agents } = state;
@@ -62,7 +105,7 @@ export function RunsPanel() {
     );
   }
 
-  // Show agents as headers with their runs
+  // Show agents as headers with their runs in a tree
   const agentIds = new Set(agents.map((a) => a.id));
   for (const run of runs) {
     agentIds.add(run.agentId);
@@ -77,6 +120,7 @@ export function RunsPanel() {
         const agentRuns = runs.filter((r) => r.agentId === agentId);
         const activeCount = agentRuns.filter((r) => r.status === "running").length;
         const name = agent?.identity?.name ?? agent?.name ?? agentId;
+        const flatTree = buildFlatRunTree(agentRuns);
 
         return (
           <Box key={agentId} flexDirection="column">
@@ -86,33 +130,17 @@ export function RunsPanel() {
               </Text>
               <Text dimColor> ({activeCount > 0 ? `${activeCount} active` : "idle"})</Text>
             </Box>
-            {agentRuns.map((run) => {
+            {flatTree.map(({ run, depth, childCount }) => {
               const thisIndex = rowIndex++;
               const selected = thisIndex === runsSelectedIndex;
               return (
-                <Box key={run.runId} flexDirection="column" paddingLeft={2}>
-                  <Box>
-                    <Text
-                      color={selected ? LOBSTER_PALETTE.accentBright : undefined}
-                      bold={selected}
-                    >
-                      {selected ? "▸ " : "  "}
-                    </Text>
-                    <Text color={statusColor(run.status)}>{statusIcon(run.status)} </Text>
-                    <Text color={selected ? LOBSTER_PALETTE.accentBright : undefined}>
-                      {run.sessionKey.split(":")[1] ?? run.sessionKey}
-                    </Text>
-                    <Text dimColor>
-                      {" "}
-                      {formatDuration(run.startedAt, run.endedAt)} · {toolSummary(run)}
-                    </Text>
-                  </Box>
-                  {run.errorMessage && (
-                    <Box paddingLeft={6}>
-                      <Text color={LOBSTER_PALETTE.error}>{run.errorMessage.slice(0, 80)}</Text>
-                    </Box>
-                  )}
-                </Box>
+                <RunRow
+                  key={run.runId}
+                  run={run}
+                  selected={selected}
+                  depth={depth}
+                  childCount={childCount}
+                />
               );
             })}
             {agentRuns.length === 0 && (

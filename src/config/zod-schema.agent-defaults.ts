@@ -168,6 +168,36 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    research: z
+      .object({
+        enabled: z.boolean().optional(),
+        roleSafety: z
+          .object({
+            enabled: z.boolean().optional(),
+            strictMode: z.boolean().optional(),
+            defaultRole: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+        testTimeScaling: z
+          .object({
+            enabled: z.boolean().optional(),
+            maxPaths: z.number().optional(),
+            qualityTarget: z.number().optional(),
+            complexityThreshold: z.number().optional(),
+          })
+          .strict()
+          .optional(),
+        shareFramework: z
+          .object({
+            enabled: z.boolean().optional(),
+            logRouting: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();

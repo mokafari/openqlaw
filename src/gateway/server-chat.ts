@@ -329,19 +329,23 @@ export function createAgentEventHandler({
     const last = agentRunSeq.get(evt.runId) ?? 0;
     const isToolEvent = evt.stream === "tool";
     const toolVerbose = isToolEvent ? resolveToolVerboseLevel(evt.runId, sessionKey) : "off";
+    // Always build a stripped tool payload (no result/partialResult) for monitoring clients.
+    const toolStrippedPayload = isToolEvent
+      ? (() => {
+          const data = evt.data ? { ...evt.data } : {};
+          delete data.result;
+          delete data.partialResult;
+          return sessionKey ? { ...evt, sessionKey, data } : { ...evt, data };
+        })()
+      : undefined;
     if (isToolEvent && toolVerbose === "off") {
       agentRunSeq.set(evt.runId, evt.seq);
+      // Broadcast stripped summary to all clients so monitoring dashboards can track tool usage.
+      broadcast("agent", toolStrippedPayload!, { dropIfSlow: true });
       return;
     }
     const toolPayload =
-      isToolEvent && toolVerbose !== "full"
-        ? (() => {
-            const data = evt.data ? { ...evt.data } : {};
-            delete data.result;
-            delete data.partialResult;
-            return sessionKey ? { ...evt, sessionKey, data } : { ...evt, data };
-          })()
-        : agentPayload;
+      isToolEvent && toolVerbose === "full" ? agentPayload : (toolStrippedPayload ?? agentPayload);
     if (evt.seq !== last + 1) {
       broadcast("agent", {
         runId: evt.runId,
@@ -357,10 +361,13 @@ export function createAgentEventHandler({
     }
     agentRunSeq.set(evt.runId, evt.seq);
     if (isToolEvent) {
+      // Send detailed payload to per-run registered recipients.
       const recipients = toolEventRecipients.get(evt.runId);
       if (recipients && recipients.size > 0) {
         broadcastToConnIds("agent", toolPayload, recipients);
       }
+      // Also broadcast stripped summary to all clients for monitoring dashboards.
+      broadcast("agent", toolStrippedPayload!, { dropIfSlow: true });
     } else {
       broadcast("agent", agentPayload);
     }

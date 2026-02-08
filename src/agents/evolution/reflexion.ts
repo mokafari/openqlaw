@@ -18,6 +18,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { log } from "../pi-embedded-runner/logger.js";
+import { DEFAULT_AGENT_WORKSPACE_DIR } from "../workspace.js";
 
 export type EpisodeOutcome = "success" | "failure" | "partial" | "aborted";
 
@@ -115,9 +116,10 @@ export class ReflexionSystem {
   private workingMemory: ReflexionEpisode[] = [];
   private maxWorkingMemory: number = 3;
 
-  constructor(workspacePath: string = process.env.WORKSPACE_ROOT || process.cwd()) {
-    this.episodeLogPath = path.join(workspacePath, "memory", "reflexion-episodes.jsonl");
-    this.hindsightLogPath = path.join(workspacePath, "memory", "hindsight-log.jsonl");
+  constructor(workspacePath?: string) {
+    const resolvedWorkspacePath = workspacePath || DEFAULT_AGENT_WORKSPACE_DIR;
+    this.episodeLogPath = path.join(resolvedWorkspacePath, "memory", "reflexion-episodes.jsonl");
+    this.hindsightLogPath = path.join(resolvedWorkspacePath, "memory", "hindsight-log.jsonl");
   }
 
   /**

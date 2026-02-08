@@ -24,6 +24,8 @@ export type SessionSummary = {
   totalTokens?: number | null;
   label?: string;
   displayName?: string;
+  /** Parent session key if this session was spawned by another. */
+  spawnedBy?: string;
 };
 
 // ── Per-run tracking ─────────────────────────────────────────────────
@@ -51,6 +53,8 @@ export type RunInfo = {
   /** Last assistant text (final, not delta). */
   lastResponse: string;
   errorMessage?: string;
+  /** Parent session key if this run's session was spawned by another. */
+  spawnedBy?: string;
 };
 
 // ── Activity feed entry (filtered — no deltas/debug) ────────────────

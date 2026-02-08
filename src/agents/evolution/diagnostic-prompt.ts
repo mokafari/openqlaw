@@ -28,7 +28,7 @@ export async function buildDiagnosticAgentPrompt(params: {
 
   // Add reflexion insights if available
   try {
-    const reflexion = getReflexionSystem();
+    const reflexion = getReflexionSystem(params.workspaceDir);
     const suggestions = await reflexion.generateImprovementSuggestions();
     if (suggestions.length > 0) {
       lines.push(`## Reflexion Insights`);
