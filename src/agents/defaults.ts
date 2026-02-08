@@ -3,4 +3,6 @@
 export const DEFAULT_PROVIDER = "anthropic";
 export const DEFAULT_MODEL = "claude-opus-4-5";
 // Context window: Opus 4.5 supports ~200k tokens (per pi-ai models.generated.ts).
-export const DEFAULT_CONTEXT_TOKENS = 200_000;
+// Reserve 5k tokens as safety margin — token estimation can undercount, causing
+// "prompt is too long" 400 errors when the effective prompt barely exceeds the limit.
+export const DEFAULT_CONTEXT_TOKENS = 195_000;

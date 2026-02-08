@@ -94,12 +94,12 @@ export async function runEmbeddedPiAgent(
 
       // Log prediction before run starts (non-blocking)
       let predictionTaskId: string | undefined;
-      if (params.commandBody && !isProbeSession) {
+      if (params.prompt && !isProbeSession) {
         try {
           const { logRunPrediction } = await import("../evolution/prediction-hooks.js");
           predictionTaskId = await logRunPrediction({
             sessionId: params.sessionId,
-            message: params.commandBody,
+            message: params.prompt,
           });
         } catch {
           // Prediction logging not available or failed - ignore
@@ -107,9 +107,9 @@ export async function runEmbeddedPiAgent(
       }
 
       // Echo detection - prevent responding to our own messages echoed back
-      if (params.commandBody && !isProbeSession) {
+      if (params.prompt && !isProbeSession) {
         const detector = getEchoDetector();
-        const echoCheck = detector.detectEcho(params.commandBody, params.sessionKey);
+        const echoCheck = detector.detectEcho(params.prompt, params.sessionKey);
         if (echoCheck.isEcho) {
           log.warn(
             `[EchoDetector] Message is an echo (${echoCheck.timeSinceOriginal}ms old): ${echoCheck.reason}. Skipping.`,
@@ -127,14 +127,14 @@ export async function runEmbeddedPiAgent(
       }
 
       // Research integration: role-safety, test-time-scaling, share-framework
-      if (params.config?.agents?.research?.enabled && !isProbeSession) {
+      if (params.config?.agents?.defaults?.research?.enabled && !isProbeSession) {
         try {
           const { getGlobalResearchIntegration } =
             await import("../evolution/research-integration.js");
           const research = getGlobalResearchIntegration();
           const validation = await research.validateAndRoute({
             sessionId: params.sessionId,
-            userMessage: params.commandBody,
+            userMessage: params.prompt,
             taskType: params.sessionKey?.includes("browser") ? "browser" : "general",
             requestedTools: [], // Will be populated from tool calls later
           });

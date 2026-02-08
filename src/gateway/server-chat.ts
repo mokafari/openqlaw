@@ -341,7 +341,7 @@ export function createAgentEventHandler({
     if (isToolEvent && toolVerbose === "off") {
       agentRunSeq.set(evt.runId, evt.seq);
       // Broadcast stripped summary to all clients so monitoring dashboards can track tool usage.
-      broadcast("agent", toolStrippedPayload!, { dropIfSlow: true });
+      broadcast("agent", toolStrippedPayload!);
       return;
     }
     const toolPayload =
@@ -367,7 +367,7 @@ export function createAgentEventHandler({
         broadcastToConnIds("agent", toolPayload, recipients);
       }
       // Also broadcast stripped summary to all clients for monitoring dashboards.
-      broadcast("agent", toolStrippedPayload!, { dropIfSlow: true });
+      broadcast("agent", toolStrippedPayload!);
     } else {
       broadcast("agent", agentPayload);
     }
