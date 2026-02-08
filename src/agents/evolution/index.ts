@@ -18,3 +18,7 @@ export * from "./test-time-scaling.js";
 export * from "./role-safety.js";
 export * from "./share-framework.js";
 export * from "./performance-metrics.js";
+export * from "./algorithm-distillation.js";
+export * from "./dytopo-routing.js";
+export * from "./dytopo-sessions-integration.js";
+export * from "./tree-of-thoughts/index.js";
