@@ -12,10 +12,13 @@ import { log } from "../pi-embedded-runner/logger.js";
 export type Prediction = {
   taskId: string;
   taskType: string;
-  predictedSuccess: number; // 0.0 - 1.0
+  predictedSuccess: number; // 0.0 - 1.0 (calibration-adjusted)
   predictedDifficulty: number; // 0.0 - 1.0
   predictedDurationMs: number;
   timestamp: number;
+  // Calibration tracking (optional for backward compatibility)
+  rawPredictedSuccess?: number; // Raw prediction before calibration boost
+  calibrationBoost?: number; // Amount of boost applied
 };
 
 export type Outcome = {

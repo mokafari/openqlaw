@@ -70,34 +70,119 @@ function estimateDifficulty(message: string): number {
 }
 
 /**
- * Estimate success probability based on task type and history.
+ * Configuration for calibration boost
+ */
+interface CalibrationConfig {
+  globalBoost: number; // Global calibration adjustment
+  taskTypeBoosts: Record<string, number>; // Task-specific adjustments
+  maxPrediction: number; // Cap for predictions
+}
+
+// Default calibration config - will be updated based on historical data
+const CALIBRATION_CONFIG: CalibrationConfig = {
+  globalBoost: 0.1, // Start with 10% boost to address 13.3% underconfidence
+  taskTypeBoosts: {
+    debugging: 0.05, // Extra boost for historically difficult tasks
+    coding: 0.03,
+    refactoring: 0.03,
+  },
+  maxPrediction: 0.99, // Cap at 99%
+};
+
+/**
+ * Apply calibration boost to raw prediction based on historical bias
+ */
+function applyCalibrationBoost(rawPrediction: number, taskType: string): number {
+  const globalBoost = CALIBRATION_CONFIG.globalBoost;
+  const taskBoost = CALIBRATION_CONFIG.taskTypeBoosts[taskType] || 0;
+  const totalBoost = globalBoost + taskBoost;
+
+  const boostedPrediction = rawPrediction + totalBoost;
+  return Math.min(CALIBRATION_CONFIG.maxPrediction, boostedPrediction);
+}
+
+/**
+ * Update calibration config based on recent performance
+ */
+async function updateCalibrationConfig(): Promise<void> {
+  try {
+    // Get overall calibration metrics
+    const overallCalibration = await metaLearning.getCalibrationMetrics("all");
+
+    if (overallCalibration && overallCalibration.predictionCount >= 10) {
+      if (overallCalibration.underconfident) {
+        // If we're underconfident, increase boost by 70% of the error
+        const adjustmentFactor = 0.7;
+        const errorAdjustment = overallCalibration.calibrationError * adjustmentFactor;
+        CALIBRATION_CONFIG.globalBoost = Math.min(0.25, errorAdjustment);
+
+        log.debug(
+          `[calibration] Updated global boost to ${(CALIBRATION_CONFIG.globalBoost * 100).toFixed(1)}% (error: ${(overallCalibration.calibrationError * 100).toFixed(1)}%)`,
+        );
+      } else if (overallCalibration.overconfident) {
+        // If we're overconfident, reduce boost
+        const adjustmentFactor = 0.5;
+        const errorReduction = overallCalibration.calibrationError * adjustmentFactor;
+        CALIBRATION_CONFIG.globalBoost = Math.max(
+          0,
+          CALIBRATION_CONFIG.globalBoost - errorReduction,
+        );
+
+        log.debug(
+          `[calibration] Reduced global boost to ${(CALIBRATION_CONFIG.globalBoost * 100).toFixed(1)}% (error: ${(overallCalibration.calibrationError * 100).toFixed(1)}%)`,
+        );
+      }
+    }
+  } catch (err) {
+    log.debug(`[calibration] Failed to update calibration config: ${String(err)}`);
+  }
+}
+
+/**
+ * Estimate success probability based on task type and history with calibration boost
  */
 async function estimateSuccess(taskType: string): Promise<number> {
   try {
+    // Update calibration config periodically
+    await updateCalibrationConfig();
+
     const calibration = await metaLearning.getCalibrationMetrics(taskType);
+
+    let rawPrediction: number;
 
     if (calibration && calibration.predictionCount >= 5) {
       // Use historical success rate with some regression to mean
-      return calibration.actualSuccessRate * 0.7 + 0.65 * 0.3;
+      rawPrediction = calibration.actualSuccessRate * 0.7 + 0.65 * 0.3;
+    } else {
+      // Default success estimates by task type
+      const defaults: Record<string, number> = {
+        explanation: 0.9,
+        research: 0.85,
+        messaging: 0.85,
+        scheduling: 0.8,
+        analysis: 0.75,
+        coding: 0.7,
+        refactoring: 0.7,
+        testing: 0.7,
+        debugging: 0.6,
+        general: 0.75,
+      };
+
+      rawPrediction = defaults[taskType] ?? 0.75;
     }
 
-    // Default success estimates by task type
-    const defaults: Record<string, number> = {
-      explanation: 0.9,
-      research: 0.85,
-      messaging: 0.85,
-      scheduling: 0.8,
-      analysis: 0.75,
-      coding: 0.7,
-      refactoring: 0.7,
-      testing: 0.7,
-      debugging: 0.6,
-      general: 0.75,
-    };
+    // Apply calibration boost
+    const adjustedPrediction = applyCalibrationBoost(rawPrediction, taskType);
 
-    return defaults[taskType] ?? 0.75;
+    log.debug(
+      `[calibration] Task ${taskType}: raw=${(rawPrediction * 100).toFixed(1)}%, adjusted=${(adjustedPrediction * 100).toFixed(1)}%, boost=${((adjustedPrediction - rawPrediction) * 100).toFixed(1)}%`,
+    );
+
+    return adjustedPrediction;
   } catch {
-    return 0.75;
+    // Fallback with basic boost
+    const fallback = 0.75;
+    return applyCalibrationBoost(fallback, taskType);
   }
 }
 
@@ -134,7 +219,31 @@ export async function logRunPrediction(params: {
     const taskId = randomUUID();
     const taskType = classifyTaskType(params.message);
     const difficulty = estimateDifficulty(params.message);
+
+    // Get raw prediction first for tracking
+    const calibration = await metaLearning.getCalibrationMetrics(taskType);
+    let rawPredictedSuccess: number;
+
+    if (calibration && calibration.predictionCount >= 5) {
+      rawPredictedSuccess = calibration.actualSuccessRate * 0.7 + 0.65 * 0.3;
+    } else {
+      const defaults: Record<string, number> = {
+        explanation: 0.9,
+        research: 0.85,
+        messaging: 0.85,
+        scheduling: 0.8,
+        analysis: 0.75,
+        coding: 0.7,
+        refactoring: 0.7,
+        testing: 0.7,
+        debugging: 0.6,
+        general: 0.75,
+      };
+      rawPredictedSuccess = defaults[taskType] ?? 0.75;
+    }
+
     const predictedSuccess = await estimateSuccess(taskType);
+    const calibrationBoost = predictedSuccess - rawPredictedSuccess;
     const predictedDurationMs = estimateDuration(taskType, difficulty);
 
     const prediction: Prediction = {
@@ -144,13 +253,15 @@ export async function logRunPrediction(params: {
       predictedDifficulty: difficulty,
       predictedDurationMs,
       timestamp: Date.now(),
+      rawPredictedSuccess,
+      calibrationBoost,
     };
 
     await metaLearning.logPrediction(prediction);
     activePredictions.set(params.sessionId, prediction);
 
     log.debug(
-      `[prediction] Logged prediction for ${params.sessionId}: ${taskType} (${Math.round(predictedSuccess * 100)}% success)`,
+      `[prediction] Logged prediction for ${params.sessionId}: ${taskType} (raw: ${Math.round(rawPredictedSuccess * 100)}% → adjusted: ${Math.round(predictedSuccess * 100)}%, boost: +${Math.round(calibrationBoost * 100)}%)`,
     );
 
     return taskId;

@@ -339,78 +339,52 @@ export function registerSubagentRun(params: {
   if (archiveAfterMs) {
     startSweeper();
   }
-  // Wait for subagent completion via gateway RPC (cross-process).
-  // The in-process lifecycle listener is a fallback for embedded runs.
+  // Wait for subagent completion via event subscription (immediate notification).
+  // This complements the in-process lifecycle listener for completion tracking.
   void waitForSubagentCompletion(params.runId, waitTimeoutMs);
 }
 
-async function waitForSubagentCompletion(runId: string, waitTimeoutMs: number) {
-  try {
+// Event-driven completion waiting - subscribes to agent events directly
+async function waitForSubagentCompletion(runId: string, waitTimeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
     const timeoutMs = Math.max(1, Math.floor(waitTimeoutMs));
-    const wait = await callGateway<{
-      status?: string;
-      startedAt?: number;
-      endedAt?: number;
-      error?: string;
-    }>({
-      method: "agent.wait",
-      params: {
-        runId,
-        timeoutMs,
-      },
-      timeoutMs: timeoutMs + 10_000,
-    });
-    if (wait?.status !== "ok" && wait?.status !== "error") {
-      return;
-    }
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (unsubscribe) unsubscribe();
+      resolve();
+    };
+
+    // Check if already completed
     const entry = subagentRuns.get(runId);
-    if (!entry) {
+    if (!entry || entry.endedAt) {
+      finish();
       return;
     }
-    let mutated = false;
-    if (typeof wait.startedAt === "number") {
-      entry.startedAt = wait.startedAt;
-      mutated = true;
-    }
-    if (typeof wait.endedAt === "number") {
-      entry.endedAt = wait.endedAt;
-      mutated = true;
-    }
-    if (!entry.endedAt) {
-      entry.endedAt = Date.now();
-      mutated = true;
-    }
-    const waitError = typeof wait.error === "string" ? wait.error : undefined;
-    entry.outcome =
-      wait.status === "error" ? { status: "error", error: waitError } : { status: "ok" };
-    mutated = true;
-    if (mutated) {
-      markRegistryDirty();
-    }
-    if (!beginSubagentCleanup(runId)) {
-      return;
-    }
-    const requesterOrigin = normalizeDeliveryContext(entry.requesterOrigin);
-    void runSubagentAnnounceFlow({
-      childSessionKey: entry.childSessionKey,
-      childRunId: entry.runId,
-      requesterSessionKey: entry.requesterSessionKey,
-      requesterOrigin,
-      requesterDisplayKey: entry.requesterDisplayKey,
-      task: entry.task,
-      timeoutMs: 30_000,
-      cleanup: entry.cleanup,
-      waitForCompletion: false,
-      startedAt: entry.startedAt,
-      endedAt: entry.endedAt,
-      label: entry.label,
-      outcome: entry.outcome,
-    }).then((didAnnounce) => {
-      finalizeSubagentCleanup(runId, entry.cleanup, didAnnounce);
+
+    // Subscribe to agent events for this specific runId
+    const unsubscribe = onAgentEvent((evt) => {
+      if (!evt || evt.stream !== "lifecycle" || evt.runId !== runId) {
+        return;
+      }
+
+      const phase = evt.data?.phase;
+      if (phase !== "end" && phase !== "error") {
+        return;
+      }
+
+      // Completion event received - resolve immediately
+      finish();
     });
-  } catch {
-    // ignore
-  }
+
+    // Timeout fallback
+    const timer = setTimeout(() => {
+      finish();
+    }, timeoutMs);
+  });
 }
 
 export function resetSubagentRegistryForTests() {
