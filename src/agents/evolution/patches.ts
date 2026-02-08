@@ -2,6 +2,8 @@ import { promises as fs } from "fs";
 import crypto from "node:crypto";
 import path from "path";
 import { resolveStateDir } from "../../config/paths.js";
+import { NotFoundError } from "../errors.js";
+import { log } from "../pi-embedded-runner/logger.js";
 import {
   parseApplyPatchFormat,
   parsePatch,
@@ -100,13 +102,21 @@ export async function savePatch(
  */
 export async function loadPatch(patchId: string): Promise<Patch | null> {
   // Search in all status directories
-  for (const status of ["pending", "applied", "reverted", "failed"] as PatchStatus[]) {
+  const statuses = ["pending", "applied", "reverted", "failed"] as PatchStatus[];
+  for (const status of statuses) {
     const patchFile = path.join(getPatchDir(status), `${patchId}.json`);
     try {
       const content = await fs.readFile(patchFile, "utf-8");
       return JSON.parse(content) as Patch;
-    } catch {
-      // Continue searching
+    } catch (err) {
+      // Expected: patch may not be in this status directory
+      // Only log parse errors, not ENOENT
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        log.debug(
+          `[patches] loadPatch: Error reading ${patchFile}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
   return null;
@@ -122,7 +132,8 @@ export async function updatePatchStatus(
 ): Promise<void> {
   const patch = await loadPatch(patchId);
   if (!patch) {
-    throw new Error(`Patch ${patchId} not found`);
+    const searchedDirs = ["pending", "applied", "reverted", "failed"].map((s) => getPatchDir(s));
+    throw new NotFoundError("Patch", patchId, searchedDirs);
   }
 
   // Remove from old directory
@@ -130,8 +141,14 @@ export async function updatePatchStatus(
   const oldFile = path.join(oldDir, `${patchId}.json`);
   try {
     await fs.unlink(oldFile);
-  } catch {
-    // File might not exist, continue
+  } catch (err) {
+    // File might not exist if status was already updated
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") {
+      log.warn(
+        `[patches] updatePatchStatus: Could not remove old file ${oldFile}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // Update metadata
@@ -165,18 +182,28 @@ export async function listPatches(status?: PatchStatus): Promise<PatchMetadata[]
       const files = await fs.readdir(dir);
       for (const file of files) {
         if (file.endsWith(".json")) {
+          const filePath = path.join(dir, file);
           try {
-            const content = await fs.readFile(path.join(dir, file), "utf-8");
+            const content = await fs.readFile(filePath, "utf-8");
             const patch = JSON.parse(content) as Patch;
             patches.push(patch.metadata);
-          } catch {
-            // Skip malformed files
+          } catch (err) {
+            // Log malformed files for debugging but continue
+            log.warn(
+              `[patches] listPatches: Skipping malformed file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+            );
             continue;
           }
         }
       }
-    } catch {
-      // Directory doesn't exist, continue
+    } catch (err) {
+      // Directory doesn't exist is expected for new installations
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        log.debug(
+          `[patches] listPatches: Error reading directory ${dir}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 

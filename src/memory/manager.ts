@@ -285,11 +285,15 @@ export class MemoryIndexManager implements MemorySearchManager {
       Math.max(1, Math.floor(maxResults * hybrid.candidateMultiplier)),
     );
 
-    const keywordResults = hybrid.enabled
-      ? await this.searchKeyword(cleaned, candidates).catch(() => [])
-      : [];
+    // Parallelize keyword search and embedding generation
+    const [keywordResults, queryVec] = await Promise.all([
+      hybrid.enabled
+        ? this.searchKeyword(cleaned, candidates).catch(() => [])
+        : Promise.resolve([]),
+      this.embedQueryWithTimeout(cleaned),
+    ]);
 
-    const queryVec = await this.embedQueryWithTimeout(cleaned);
+    // Vector search runs after (needs embedding result)
     const hasVector = queryVec.some((v) => v !== 0);
     const vectorResults = hasVector
       ? await this.searchVector(queryVec, candidates).catch(() => [])
@@ -1122,6 +1126,22 @@ export class MemoryIndexManager implements MemorySearchManager {
     }
 
     const tasks = fileEntries.map((entry) => async () => {
+      // Mtime-based skip: check mtime first before reading content
+      if (!params.needsFullReindex) {
+        const mtimeCheck = this.shouldIndexFile(entry.path, "memory", entry.mtimeMs);
+        if (mtimeCheck.skip) {
+          if (params.progress) {
+            params.progress.completed += 1;
+            params.progress.report({
+              completed: params.progress.completed,
+              total: params.progress.total,
+            });
+          }
+          return;
+        }
+      }
+
+      // Mtime changed or full reindex - read and hash-check as fallback
       const record = this.db
         .prepare(`SELECT hash FROM files WHERE path = ? AND source = ?`)
         .get(entry.path, "memory") as { hash: string } | undefined;
@@ -1208,6 +1228,28 @@ export class MemoryIndexManager implements MemorySearchManager {
         }
         return;
       }
+
+      // Mtime-based skip: check mtime before reading file content
+      if (!params.needsFullReindex) {
+        try {
+          const stat = await fs.stat(absPath);
+          const sessionPath = this.sessionPathForFile(absPath);
+          const mtimeCheck = this.shouldIndexFile(sessionPath, "sessions", stat.mtimeMs);
+          if (mtimeCheck.skip) {
+            if (params.progress) {
+              params.progress.completed += 1;
+              params.progress.report({
+                completed: params.progress.completed,
+                total: params.progress.total,
+              });
+            }
+            return;
+          }
+        } catch {
+          // If stat fails, fall through to buildSessionEntry which handles errors
+        }
+      }
+
       const entry = await this.buildSessionEntry(absPath);
       if (!entry) {
         if (params.progress) {
@@ -1599,6 +1641,36 @@ export class MemoryIndexManager implements MemorySearchManager {
       .trim();
   }
 
+  /**
+   * Check if file needs to be indexed based on mtime.
+   * Returns: { skip: true } if mtime unchanged (within 1s tolerance)
+   * Returns: { skip: false, needsHashCheck: true } if mtime changed (need to read & hash)
+   */
+  private shouldIndexFile(
+    filePath: string,
+    source: MemorySource,
+    currentMtimeMs: number,
+  ): { skip: true } | { skip: false; needsHashCheck: true } {
+    const record = this.db
+      .prepare(`SELECT mtime FROM files WHERE path = ? AND source = ?`)
+      .get(filePath, source) as { mtime: number } | undefined;
+
+    if (!record) {
+      // No record exists, need to index
+      return { skip: false, needsHashCheck: true };
+    }
+
+    // Mtime tolerance: 1 second (1000ms)
+    const mtimeDiff = Math.abs(currentMtimeMs - record.mtime);
+    if (mtimeDiff < 1000) {
+      // Mtime unchanged within tolerance, skip entirely
+      return { skip: true };
+    }
+
+    // Mtime changed, need to read and hash-check
+    return { skip: false, needsHashCheck: true };
+  }
+
   private extractSessionText(content: unknown): string | null {
     if (typeof content === "string") {
       const normalized = this.normalizeSessionText(content);
@@ -1841,9 +1913,26 @@ export class MemoryIndexManager implements MemorySearchManager {
     const missingChunks = missing.map((m) => m.chunk);
     const batches = this.buildEmbeddingBatches(missingChunks);
     const toCache: Array<{ hash: string; embedding: number[] }> = [];
+
+    // Process up to 2 embedding batches in parallel, reassemble results in order
+    const BATCH_CONCURRENCY = 2;
+    const batchResults: number[][][] = Array.from({ length: batches.length }, () => []);
+
+    for (let i = 0; i < batches.length; i += BATCH_CONCURRENCY) {
+      const batchSlice = batches.slice(i, i + BATCH_CONCURRENCY);
+      const sliceResults = await Promise.all(
+        batchSlice.map((batch) => this.embedBatchWithRetry(batch.map((chunk) => chunk.text))),
+      );
+      for (let j = 0; j < sliceResults.length; j++) {
+        batchResults[i + j] = sliceResults[j];
+      }
+    }
+
+    // Reassemble results in order
     let cursor = 0;
-    for (const batch of batches) {
-      const batchEmbeddings = await this.embedBatchWithRetry(batch.map((chunk) => chunk.text));
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx];
+      const batchEmbeddings = batchResults[batchIdx];
       for (let i = 0; i < batch.length; i += 1) {
         const item = missing[cursor + i];
         const embedding = batchEmbeddings[i] ?? [];

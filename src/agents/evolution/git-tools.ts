@@ -88,6 +88,7 @@ export class GitTools {
    * Uses execFileSync to avoid shell interpretation of special characters.
    */
   private runGit(args: string[]): string {
+    const cmdStr = `git ${args.join(" ")}`;
     try {
       return execFileSync("git", args, {
         cwd: this.repoPath,
@@ -96,8 +97,16 @@ export class GitTools {
         stdio: ["pipe", "pipe", "pipe"],
       }).trim();
     } catch (err) {
-      const error = err as { stderr?: string; message?: string };
-      throw new Error(`Git command failed: ${error.stderr ?? error.message}`);
+      const error = err as { stderr?: string; message?: string; code?: string; killed?: boolean };
+      const reason = error.killed
+        ? `Timed out after ${this.timeout}ms`
+        : error.stderr?.trim() || error.message || "Unknown error";
+      throw new Error(
+        `Git command failed:\n` +
+          `  Command: ${cmdStr}\n` +
+          `  CWD: ${this.repoPath}\n` +
+          `  Error: ${reason}`,
+      );
     }
   }
 
@@ -321,6 +330,7 @@ export class GitTools {
 
   /**
    * Check if a file was modified in a commit.
+   * Returns false if the commit doesn't exist or there's an error checking.
    */
   async wasFileModified(commitHash: string, filePath: string): Promise<boolean> {
     try {
@@ -328,7 +338,14 @@ export class GitTools {
       const files = output.split("\n").map((f) => f.trim());
       const relativePath = filePath.startsWith("/") ? relative(this.repoPath, filePath) : filePath;
       return files.includes(relativePath);
-    } catch {
+    } catch (err) {
+      // Commit may not exist or file may not be tracked - this is expected in some cases
+      // Log at debug level to avoid noise
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes("bad object") && !msg.includes("not a git repository")) {
+        // Only log unexpected errors
+        console.debug(`[git-tools] wasFileModified(${commitHash}, ${filePath}) failed: ${msg}`);
+      }
       return false;
     }
   }

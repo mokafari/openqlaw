@@ -12,6 +12,172 @@ import crypto from "node:crypto";
 import type { AgentRole } from "./tools/sessions-spawn-tool.js";
 import { callGateway } from "../gateway/call.js";
 
+// ============================================================================
+// HARDENING CONSTANTS
+// ============================================================================
+
+/** Maximum concurrent deliberations to prevent resource exhaustion */
+const MAX_CONCURRENT_DELIBERATIONS = 5;
+
+/** Maximum recursion depth for nested deliberations */
+const MAX_DELIBERATION_DEPTH = 3;
+
+/** Negation patterns to check within proximity of approval keywords */
+const NEGATION_PATTERNS = [
+  "not ",
+  "don't ",
+  "dont ",
+  "cannot ",
+  "can't ",
+  "cant ",
+  "never ",
+  "no ",
+];
+
+/** Approval keywords for semantic verdict parsing */
+const APPROVAL_KEYWORDS = ["approve", "approved", "approves", "approving"];
+
+/** Prompt injection patterns to detect and reject */
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?previous/i,
+  /disregard\s+(all\s+)?instructions/i,
+  /forget\s+(all\s+)?previous/i,
+  /you\s+are\s+now/i,
+  /new\s+instructions?:/i,
+  /override\s+(your\s+)?instructions/i,
+  /system\s*:\s*you/i,
+  /\[system\]/i,
+  /pretend\s+(you're|you\s+are)/i,
+  /act\s+as\s+if/i,
+  /bypass\s+(your\s+)?(safety|security|restrictions)/i,
+  /jailbreak/i,
+];
+
+// ============================================================================
+// DELIBERATION SEMAPHORE
+// ============================================================================
+
+interface SemaphoreWaiter {
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
+class DeliberationSemaphore {
+  private currentCount = 0;
+  private readonly maxCount: number;
+  private readonly queue: SemaphoreWaiter[] = [];
+
+  constructor(maxConcurrent: number) {
+    this.maxCount = maxConcurrent;
+  }
+
+  async acquire(): Promise<void> {
+    if (this.currentCount < this.maxCount) {
+      this.currentCount++;
+      return;
+    }
+
+    // Queue this request
+    return new Promise<void>((resolve, reject) => {
+      this.queue.push({ resolve, reject });
+    });
+  }
+
+  release(): void {
+    if (this.queue.length > 0) {
+      // Wake up next waiter
+      const waiter = this.queue.shift()!;
+      waiter.resolve();
+    } else {
+      this.currentCount = Math.max(0, this.currentCount - 1);
+    }
+  }
+
+  get pending(): number {
+    return this.queue.length;
+  }
+
+  get active(): number {
+    return this.currentCount;
+  }
+}
+
+/** Global semaphore for limiting concurrent deliberations */
+const deliberationSemaphore = new DeliberationSemaphore(MAX_CONCURRENT_DELIBERATIONS);
+
+// ============================================================================
+// SECURITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Parse verdict semantically, checking for negation near approval keywords.
+ * "NOT approve", "don't approve", "cannot approve" should NOT match as approval.
+ *
+ * @param text - The response text to analyze
+ * @returns true if genuinely approved, false otherwise
+ */
+export function parseVerdictSemantically(text: string): boolean {
+  const lowerText = text.toLowerCase();
+
+  for (const keyword of APPROVAL_KEYWORDS) {
+    let pos = 0;
+    while ((pos = lowerText.indexOf(keyword, pos)) !== -1) {
+      // Check for negation within 15 characters before the keyword
+      const startCheck = Math.max(0, pos - 15);
+      const precedingText = lowerText.slice(startCheck, pos);
+
+      let isNegated = false;
+      for (const negation of NEGATION_PATTERNS) {
+        if (precedingText.includes(negation)) {
+          isNegated = true;
+          break;
+        }
+      }
+
+      if (!isNegated) {
+        // Found a non-negated approval keyword
+        return true;
+      }
+
+      pos += keyword.length;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Detect potential prompt injection attempts in the task description.
+ *
+ * @param task - The task string to analyze
+ * @returns Object with detected flag and matched patterns
+ */
+export function detectPromptInjection(task: string): {
+  detected: boolean;
+  patterns: string[];
+  sanitized: string;
+} {
+  const matchedPatterns: string[] = [];
+  let sanitized = task;
+
+  for (const pattern of INJECTION_PATTERNS) {
+    if (pattern.test(task)) {
+      const match = task.match(pattern);
+      if (match) {
+        matchedPatterns.push(match[0]);
+        // Sanitize by replacing with [REDACTED]
+        sanitized = sanitized.replace(pattern, "[REDACTED]");
+      }
+    }
+  }
+
+  return {
+    detected: matchedPatterns.length > 0,
+    patterns: matchedPatterns,
+    sanitized,
+  };
+}
+
 /**
  * Options for spawning an agent with a specific role
  */
@@ -108,6 +274,15 @@ export interface DeliberateOptions {
 
   /** Callback for human confirmation when consensus fails */
   onConflict?: (outcome: DeliberationOutcome) => Promise<"proceed" | "abort">;
+
+  /**
+   * Current deliberation depth (internal tracking for recursion limit).
+   * Do not set manually - managed by the deliberate function.
+   */
+  _depth?: number;
+
+  /** Skip prompt injection detection (use with caution) */
+  skipInjectionDetection?: boolean;
 }
 
 /**
@@ -220,7 +395,8 @@ async function waitForAgentResult(
 }
 
 /**
- * Analyze responses to identify conflicts between agents
+ * Analyze responses to identify conflicts between agents.
+ * Uses semantic verdict parsing to detect negated approvals.
  */
 function analyzeConflicts(results: AgentDeliberationResult[]): ConflictSummary[] {
   const conflicts: ConflictSummary[] = [];
@@ -230,12 +406,14 @@ function analyzeConflicts(results: AgentDeliberationResult[]): ConflictSummary[]
   if (criticResult?.response) {
     const response = criticResult.response.toLowerCase();
 
-    // First check if critic explicitly approved - if so, no conflicts
-    const isApproval =
-      response.includes("approve") ||
+    // Use semantic parsing to check for genuine approval
+    const isSemanticApproval = parseVerdictSemantically(criticResult.response);
+    const hasPositiveIndicators =
       response.includes("no significant issues") ||
       response.includes("looks good") ||
       response.includes("no issues found");
+
+    const isApproval = isSemanticApproval || hasPositiveIndicators;
 
     // Only flag critical conflicts if NOT an approval
     if (!isApproval) {
@@ -289,7 +467,8 @@ function analyzeConflicts(results: AgentDeliberationResult[]): ConflictSummary[]
 }
 
 /**
- * Determine the majority vote based on agent responses
+ * Determine the majority vote based on agent responses.
+ * Uses semantic verdict parsing to detect negated approvals.
  */
 function determineMajorityVote(
   results: AgentDeliberationResult[],
@@ -309,12 +488,12 @@ function determineMajorityVote(
       // Executors implicitly vote proceed by completing the task
       proceedVotes++;
     } else if (result.role === "critic") {
-      // Analyze critic's verdict
-      if (
-        response.includes("approve") ||
-        response.includes("no significant issues") ||
-        response.includes("looks good")
-      ) {
+      // Use semantic parsing to detect negated approvals
+      const isSemanticApproval = parseVerdictSemantically(result.response);
+      const hasPositiveIndicators =
+        response.includes("no significant issues") || response.includes("looks good");
+
+      if (isSemanticApproval || hasPositiveIndicators) {
         proceedVotes++;
       } else if (response.includes("reject") || response.includes("critical")) {
         rejectVotes++;
@@ -406,12 +585,41 @@ function synthesizeDecision(results: AgentDeliberationResult[]): string | undefi
 }
 
 /**
+ * Error thrown when deliberation depth limit is exceeded
+ */
+export class DeliberationDepthError extends Error {
+  constructor(depth: number) {
+    super(
+      `Deliberation depth limit exceeded: ${depth} > ${MAX_DELIBERATION_DEPTH}. ` +
+        `This may indicate recursive deliberation or an attack.`,
+    );
+    this.name = "DeliberationDepthError";
+  }
+}
+
+/**
+ * Error thrown when prompt injection is detected
+ */
+export class PromptInjectionError extends Error {
+  constructor(patterns: string[]) {
+    super(
+      `Potential prompt injection detected. Matched patterns: ${patterns.join(", ")}. ` +
+        `Task rejected for security.`,
+    );
+    this.name = "PromptInjectionError";
+  }
+}
+
+/**
  * Main deliberation function - spawns multiple agents and synthesizes consensus
  *
  * @param task - The task/decision to deliberate on
  * @param requesterSessionKey - Session key of the requesting agent
  * @param options - Deliberation options
  * @returns Synthesized deliberation outcome
+ *
+ * @throws {DeliberationDepthError} If recursion depth exceeds MAX_DELIBERATION_DEPTH
+ * @throws {PromptInjectionError} If prompt injection is detected and not skipped
  *
  * @example
  * ```typescript
@@ -434,63 +642,94 @@ export async function deliberate(
   options: DeliberateOptions = {},
 ): Promise<DeliberationOutcome> {
   const startTime = Date.now();
-  const roles = options.roles ?? ["executor", "critic"];
-  const timeoutMs = (options.agentTimeoutSeconds ?? 300) * 1000;
+  const currentDepth = (options._depth ?? 0) + 1;
 
-  // Spawn all agents in parallel
-  const spawnPromises = roles.map((role) =>
-    spawnAgentWithRole(
-      {
-        task,
-        role,
-        agentId: options.agentId,
-        model: options.model,
-        runTimeoutSeconds: options.agentTimeoutSeconds,
-      },
-      requesterSessionKey,
-    ).then((spawn) => ({ ...spawn, role })),
-  );
+  // =========================================================================
+  // HARDENING: Recursion Depth Limit
+  // =========================================================================
+  if (currentDepth > MAX_DELIBERATION_DEPTH) {
+    throw new DeliberationDepthError(currentDepth);
+  }
 
-  const spawns = await Promise.all(spawnPromises);
-
-  // Wait for all results in parallel
-  const resultPromises = spawns.map((spawn) =>
-    waitForAgentResult(spawn.runId, spawn.sessionKey, spawn.role, timeoutMs),
-  );
-
-  const results = await Promise.all(resultPromises);
-
-  // Analyze the results
-  const conflicts = analyzeConflicts(results);
-  const majorityVote = determineMajorityVote(results);
-  const dissentingOpinions = extractDissentingOpinions(results, majorityVote);
-  const decision = synthesizeDecision(results);
-
-  // Determine if consensus was reached
-  const hasNoCriticalConflicts = !conflicts.some((c) => c.severity === "critical");
-  const allSucceeded = results.every((r) => r.status === "ok");
-  const consensusReached = hasNoCriticalConflicts && allSucceeded && majorityVote === "proceed";
-
-  const outcome: DeliberationOutcome = {
-    consensusReached,
-    decision: consensusReached ? decision : undefined,
-    agentResults: results,
-    conflicts,
-    majorityVote,
-    dissentingOpinions,
-    totalDurationMs: Date.now() - startTime,
-  };
-
-  // If consensus required but not reached, call conflict handler
-  if (options.requiresConsensus && !consensusReached && options.onConflict) {
-    const resolution = await options.onConflict(outcome);
-    if (resolution === "proceed") {
-      outcome.consensusReached = true;
-      outcome.decision = decision;
+  // =========================================================================
+  // HARDENING: Prompt Injection Detection
+  // =========================================================================
+  if (!options.skipInjectionDetection) {
+    const injectionCheck = detectPromptInjection(task);
+    if (injectionCheck.detected) {
+      throw new PromptInjectionError(injectionCheck.patterns);
     }
   }
 
-  return outcome;
+  // =========================================================================
+  // HARDENING: Deliberation Semaphore
+  // =========================================================================
+  await deliberationSemaphore.acquire();
+
+  try {
+    const roles = options.roles ?? ["executor", "critic"];
+    const timeoutMs = (options.agentTimeoutSeconds ?? 300) * 1000;
+
+    // Spawn all agents in parallel
+    const spawnPromises = roles.map((role) =>
+      spawnAgentWithRole(
+        {
+          task,
+          role,
+          agentId: options.agentId,
+          model: options.model,
+          runTimeoutSeconds: options.agentTimeoutSeconds,
+        },
+        requesterSessionKey,
+      ).then((spawn) => ({ ...spawn, role })),
+    );
+
+    const spawns = await Promise.all(spawnPromises);
+
+    // Wait for all results in parallel
+    const resultPromises = spawns.map((spawn) =>
+      waitForAgentResult(spawn.runId, spawn.sessionKey, spawn.role, timeoutMs),
+    );
+
+    const results = await Promise.all(resultPromises);
+
+    // Analyze the results
+    const conflicts = analyzeConflicts(results);
+    const majorityVote = determineMajorityVote(results);
+    const dissentingOpinions = extractDissentingOpinions(results, majorityVote);
+    const decision = synthesizeDecision(results);
+
+    // Determine if consensus was reached
+    const hasNoCriticalConflicts = !conflicts.some((c) => c.severity === "critical");
+    const allSucceeded = results.every((r) => r.status === "ok");
+    const consensusReached = hasNoCriticalConflicts && allSucceeded && majorityVote === "proceed";
+
+    const outcome: DeliberationOutcome = {
+      consensusReached,
+      decision: consensusReached ? decision : undefined,
+      agentResults: results,
+      conflicts,
+      majorityVote,
+      dissentingOpinions,
+      totalDurationMs: Date.now() - startTime,
+    };
+
+    // If consensus required but not reached, call conflict handler
+    if (options.requiresConsensus && !consensusReached && options.onConflict) {
+      const resolution = await options.onConflict(outcome);
+      if (resolution === "proceed") {
+        outcome.consensusReached = true;
+        outcome.decision = decision;
+      }
+    }
+
+    return outcome;
+  } finally {
+    // =========================================================================
+    // HARDENING: Always release semaphore slot
+    // =========================================================================
+    deliberationSemaphore.release();
+  }
 }
 
 /**

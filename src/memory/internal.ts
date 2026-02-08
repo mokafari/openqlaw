@@ -108,20 +108,28 @@ export async function listMemoryFiles(
 
   const normalizedExtraPaths = normalizeExtraMemoryPaths(workspaceDir, extraPaths);
   if (normalizedExtraPaths.length > 0) {
-    for (const inputPath of normalizedExtraPaths) {
-      try {
-        const stat = await fs.lstat(inputPath);
-        if (stat.isSymbolicLink()) {
-          continue;
-        }
-        if (stat.isDirectory()) {
-          await walkDir(inputPath, result);
-          continue;
-        }
-        if (stat.isFile() && inputPath.endsWith(".md")) {
-          result.push(inputPath);
-        }
-      } catch {}
+    // Optimization #3: Parallel path walking with Promise.all
+    const extraResults = await Promise.all(
+      normalizedExtraPaths.map(async (inputPath): Promise<string[]> => {
+        try {
+          const stat = await fs.lstat(inputPath);
+          if (stat.isSymbolicLink()) {
+            return [];
+          }
+          if (stat.isDirectory()) {
+            const dirFiles: string[] = [];
+            await walkDir(inputPath, dirFiles);
+            return dirFiles;
+          }
+          if (stat.isFile() && inputPath.endsWith(".md")) {
+            return [inputPath];
+          }
+        } catch {}
+        return [];
+      }),
+    );
+    for (const files of extraResults) {
+      result.push(...files);
     }
   }
   if (result.length <= 1) {
@@ -204,21 +212,24 @@ export function chunkMarkdown(
       currentChars = 0;
       return;
     }
+    // Optimization #7: Use index-based tracking instead of unshift
+    // Find the start index where we should keep entries from
     let acc = 0;
-    const kept: Array<{ line: string; lineNo: number }> = [];
+    let startIdx = current.length;
     for (let i = current.length - 1; i >= 0; i -= 1) {
       const entry = current[i];
       if (!entry) {
         continue;
       }
       acc += entry.line.length + 1;
-      kept.unshift(entry);
+      startIdx = i;
       if (acc >= overlapChars) {
         break;
       }
     }
-    current = kept;
-    currentChars = kept.reduce((sum, entry) => sum + entry.line.length + 1, 0);
+    // Slice from startIdx to end - no unshift, no reversal needed
+    current = current.slice(startIdx);
+    currentChars = acc;
   };
 
   for (let i = 0; i < lines.length; i += 1) {

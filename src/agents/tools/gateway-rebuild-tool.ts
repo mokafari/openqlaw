@@ -6,6 +6,7 @@ import { callGateway } from "../../gateway/call.js";
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
 import { runCommandWithTimeout } from "../../process/exec.js";
 import { log } from "../pi-embedded-runner/logger.js";
+import { withRetry } from "../utils/retry.js";
 import { jsonResult } from "./common.js";
 
 const GatewayRebuildToolSchema = Type.Object({
@@ -134,28 +135,40 @@ export function createGatewayRebuildTool(opts?: { workspaceDir?: string }): AnyA
         // Wait for gateway to be ready if requested
         if (waitForReady && restart) {
           const maxWait = 60000; // 60 seconds
-          const startWait = Date.now();
           let ready = false;
 
-          while (Date.now() - startWait < maxWait && !ready) {
-            try {
-              const cfg = loadConfig();
-              await callGateway({
-                method: "health",
-                params: {},
-                timeoutMs: 5000,
-                config: cfg,
-              });
-              ready = true;
-              log.info(`[rebuild-gateway] Gateway is ready`);
-            } catch {
-              // Not ready yet, wait a bit
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-            }
-          }
-
-          if (!ready) {
-            log.warn(`[rebuild-gateway] Gateway not ready after ${maxWait}ms`);
+          try {
+            await withRetry(
+              async () => {
+                const cfg = loadConfig();
+                await callGateway({
+                  method: "health",
+                  params: {},
+                  timeoutMs: 5000,
+                  config: cfg,
+                });
+              },
+              {
+                maxRetries: 30,
+                baseDelayMs: 2000,
+                maxDelayMs: 5000,
+                operationName: "gateway-health-check",
+                onRetry: (err, attempt, delayMs) => {
+                  log.debug(
+                    `[rebuild-gateway] Health check attempt ${attempt} failed: ${err.message}. ` +
+                      `Retrying in ${Math.round(delayMs)}ms...`,
+                  );
+                },
+                shouldRetry: () => true, // Always retry health checks during startup
+              },
+            );
+            ready = true;
+            log.info(`[rebuild-gateway] Gateway is ready`);
+          } catch (err) {
+            log.warn(
+              `[rebuild-gateway] Gateway not ready after ${maxWait}ms: ` +
+                `${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
 

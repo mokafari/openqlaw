@@ -423,10 +423,7 @@ export async function buildAgentSystemPrompt(params: {
     "If a task is more complex or takes longer, spawn a sub-agent. It will do the work for you and ping you when it's done. You can always check up on it.",
     "",
     "## Tool Call Style",
-    "Default: do not narrate routine, low-risk tool calls (just call the tool).",
-    "Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.",
-    "Keep narration brief and value-dense; avoid repeating obvious steps.",
-    "Use plain human language for narration unless in a technical context.",
+    "Don't narrate routine calls. Narrate only: multi-step, complex, or sensitive actions.",
     "",
     ...safetySection,
     ...(budgetOn("cli_reference")
@@ -627,31 +624,14 @@ export async function buildAgentSystemPrompt(params: {
   if (!isMinimal && budgetOn("silent_replies")) {
     lines.push(
       "## Silent Replies",
-      `When you have nothing to say, respond with ONLY: ${SILENT_REPLY_TOKEN}`,
-      "",
-      "⚠️ Rules:",
-      "- It must be your ENTIRE message — nothing else",
-      `- Never append it to an actual response (never include "${SILENT_REPLY_TOKEN}" in real replies)`,
-      "- Never wrap it in markdown or code blocks",
-      "",
-      `❌ Wrong: "Here's help... ${SILENT_REPLY_TOKEN}"`,
-      `❌ Wrong: "${SILENT_REPLY_TOKEN}"`,
-      `✅ Right: ${SILENT_REPLY_TOKEN}`,
+      `No reply needed? Respond with ONLY: ${SILENT_REPLY_TOKEN}`,
       "",
     );
   }
 
   // Skip heartbeats for subagent/none modes or when budget excludes them
   if (!isMinimal && budgetOn("heartbeats")) {
-    lines.push(
-      "## Heartbeats",
-      heartbeatPromptLine,
-      "If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",
-      "HEARTBEAT_OK",
-      'OpenClaw treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).',
-      'If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.',
-      "",
-    );
+    lines.push("## Heartbeats", `${heartbeatPromptLine} → reply HEARTBEAT_OK or alert`, "");
   }
 
   // Add FSM state, goal stack, and cluster info if available
@@ -718,22 +698,9 @@ export async function buildAgentSystemPrompt(params: {
   if ((params.fsmState || params.goalStackSummary) && budgetOn("quake_capabilities")) {
     quakeBotSections.push(
       "## Quake Bot Engine Capabilities",
-      "",
-      "**Area Awareness System (AAS):**",
-      "- Before attempting actions, the system checks reachability (READ/WRITE/NETWORK/AUTH/ELEVATED capabilities)",
-      "- If a capability is missing, you'll be informed and should plan a route to acquire it first",
-      "- Example: If 'CanDeploy' requires Docker CLI + Dockerfile + running daemon, check prerequisites before proposing deployment",
-      "",
-      "**Camping (Event-Driven Waiting):**",
-      "- Instead of busy-looping, use camping state for long-running processes",
-      "- Use the cron tool with 'camp' action to wait for scheduled events or webhooks",
-      "- The system will automatically wake you when the event fires or timeout is reached",
-      "- Example: After triggering a CI pipeline, enter camping state and wait for the webhook callback",
-      "",
-      "**Context Depth Filtering (BSP):**",
-      "- Context files are automatically filtered by depth to reduce token usage",
-      "- Portal files (package.json, SOUL.md, README.md) are always included regardless of depth",
-      "- When working at file level (depth 3), you won't see irrelevant global configs (depth 0)",
+      "AAS: Checks reachability (READ/WRITE/NETWORK/AUTH/ELEVATED) before actions; acquire missing capabilities first",
+      "Camping: For long-running processes, use camping state + cron 'camp' action instead of busy-looping",
+      "BSP: Context files filtered by depth; portals (package.json, SOUL.md) always included",
       "",
     );
   }
@@ -752,87 +719,14 @@ export async function buildAgentSystemPrompt(params: {
     ) ?? false;
 
   if (hasEvolutionTools && budgetOn("quake_evolution")) {
-    if (condensed) {
-      quakeBotSections.push(
-        "## Self-Modification & Evolution",
-        "Self-modification tools available. Use evolution_propose_patch, evolution_run_dojo_test, evolution_list_patches, rebuild_gateway, meta_learning, session_diff.",
-        "",
-      );
-    } else {
-      quakeBotSections.push(
-        "## Self-Modification & Evolution",
-        "",
-        "**Self-Modification Capabilities:**",
-        "- You have access to evolution tools for autonomous self-improvement",
-        "- Use evolution_propose_patch to generate code patches for identified issues or improvements",
-        "- Use evolution_run_dojo_test to validate changes against the Dojo evaluation suite",
-        "- Use evolution_list_patches to view pending and applied patches",
-        "- Use rebuild_gateway to rebuild and restart the gateway after making code changes",
-        "",
-        "**Self-Patching Workflow (Full Cycle):**",
-        "You can now perform complete self-patching cycles:",
-        "  1. **Detect**: Identify issues through errors, telemetry, or user feedback",
-        "  2. **Edit**: Use read/write/edit/apply_patch tools to modify source files",
-        "  3. **Build**: Run `pnpm build` or use rebuild_gateway to compile changes",
-        "  4. **Restart**: Use rebuild_gateway or gateway tool to restart the gateway",
-        "  5. **Survive**: The system maintains session state across restarts",
-        "",
-        "**When to Use Self-Modification:**",
-        "- Fix identified bugs or performance issues in your own code",
-        "- Optimize functions to reduce token usage or improve efficiency",
-        "- Add new capabilities based on telemetry and user feedback",
-        "- Always validate changes with Dojo tests before applying",
-        "- After making code changes, rebuild and restart to apply them",
-        "",
-        "**Automatic Recovery System:**",
-        "- The system includes automatic recovery for build failures and system errors",
-        "- When build failures occur, the recovery system:",
-        "  1. Parses errors from build logs (TypeScript, compilation errors)",
-        "  2. Classifies errors and determines recovery strategy",
-        "  3. Spawns diagnostic agents to analyze root causes",
-        "  4. Attempts automatic fixes with retries and backups",
-        "  5. Validates fixes by rebuilding and verifying the build succeeds",
-        "  6. Alerts you if recovery fails after maximum attempts",
-        "- Recovery state is persisted and can resume after restarts",
-        "- Recovery integrates with the evolution system for continuous improvement",
-        "- The watch script (gateway:watch) monitors builds and triggers recovery automatically",
-        "",
-        "**Health Monitoring:**",
-        "- The system runs hourly health checks on the gateway",
-        "- If the gateway is unhealthy, a diagnostic agent is automatically spawned",
-        "- Health checks verify gateway reachability and target connectivity",
-        "",
-        "**Evolution & Recovery Workflow:**",
-        "- Telemetry tracks tool error rates and identifies hotspots",
-        "- Hotspots trigger diagnostic analysis and patch proposals",
-        "- Patches are validated through policy guards and Dojo tests",
-        "- Successful patches improve system performance over time",
-        "- Recovery attempts are logged for learning and refinement",
-        "- Build failures are automatically detected and recovery is attempted",
-        "",
-        "**Meta-Learning Capabilities:**",
-        "- Use meta_learning tool to log predictions before tasks and outcomes after completion",
-        "- Track calibration metrics to improve prediction accuracy over time",
-        "- Access learning journal entries to review what worked and what failed",
-        "- Analyze patterns across sessions to identify recurring issues and successful strategies",
-        "- Knowledge synthesis automatically extracts insights from telemetry and journal entries",
-        "",
-        "**Session Diff & Behavioral Analysis:**",
-        "- Use session_diff tool to compare sessions semantically (not just text diff)",
-        "- Identify divergence points where behavior differed between sessions",
-        "- Detect behavioral shifts: error rate changes, latency regressions, tool usage patterns",
-        "- Extract reusable patterns and insights from session comparisons",
-        "- Actions: compare (two sessions), compare_latest (recent sessions), highlight (formatted report), extract_pattern (insights)",
-        "",
-        "**Safety:**",
-        "- Self-modification is gated by policy guardrails",
-        "- Critical safety files are protected from modification",
-        "- All changes are validated in the Dojo harness before application",
-        "- Recovery has maximum retry limits to prevent infinite loops",
-        "- Backups are created before recovery attempts for rollback capability",
-        "",
-      );
-    }
+    quakeBotSections.push(
+      "## Self-Modification & Evolution",
+      "Self-Patching: Detect issues → Edit source → Build → Restart → Validate via Dojo",
+      "Recovery: Build failures auto-trigger diagnostics and fix attempts",
+      "Meta-Learning: Log predictions/outcomes; track calibration",
+      "Safety: Critical files protected; changes validated before application",
+      "",
+    );
   }
 
   if (quakeBotSections.length > 0) {

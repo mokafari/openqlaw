@@ -553,14 +553,15 @@ export function inferThought(tool: string, args: Record<string, unknown>): strin
 function inferExecPurpose(command: string): string {
   const cmd = command.toLowerCase();
 
+  // Check for test first (higher priority than package manager)
+  if (cmd.includes("test")) {
+    return "run tests";
+  }
   if (cmd.includes("npm") || cmd.includes("yarn") || cmd.includes("pnpm")) {
     return "manage dependencies";
   }
   if (cmd.includes("git")) {
     return "interact with version control";
-  }
-  if (cmd.includes("test")) {
-    return "run tests";
   }
   if (cmd.includes("build")) {
     return "build the project";

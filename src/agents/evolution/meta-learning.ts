@@ -188,8 +188,14 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
         if (entry) {
           entries.push(entry);
         }
-      } catch {
-        // File doesn't exist, skip
+      } catch (err) {
+        // File doesn't exist is expected - not all days have journal entries
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") {
+          log.debug(
+            `[meta-learning] getRecentJournalEntries: Error reading ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
     }
 
@@ -243,6 +249,7 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
       const content = await fs.readFile(this.predictionsFile, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
       const predictions: Prediction[] = [];
+      let malformedCount = 0;
       for (const line of lines) {
         try {
           const pred = JSON.parse(line) as Prediction;
@@ -250,12 +257,23 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
           if (!taskType || taskType === "all" || pred.taskType === taskType) {
             predictions.push(pred);
           }
-        } catch {
-          // Skip malformed lines
+        } catch (err) {
+          // Skip malformed lines but track count for debugging
+          malformedCount++;
         }
       }
+      if (malformedCount > 0) {
+        log.debug(`[meta-learning] loadPredictions: Skipped ${malformedCount} malformed lines`);
+      }
       return predictions;
-    } catch {
+    } catch (err) {
+      // File doesn't exist is expected for new installations
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        log.debug(
+          `[meta-learning] loadPredictions failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       return [];
     }
   }
@@ -265,6 +283,7 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
       const content = await fs.readFile(this.outcomesFile, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
       const outcomes: Outcome[] = [];
+      let malformedCount = 0;
       for (const line of lines) {
         try {
           const outcome = JSON.parse(line) as Outcome;
@@ -275,12 +294,23 @@ ${entry.strategyChanges.map((item) => `- ${item}`).join("\n")}
             // We'd need to match via taskId, so include all for now
             outcomes.push(outcome);
           }
-        } catch {
-          // Skip malformed lines
+        } catch (err) {
+          // Skip malformed lines but track count for debugging
+          malformedCount++;
         }
       }
+      if (malformedCount > 0) {
+        log.debug(`[meta-learning] loadOutcomes: Skipped ${malformedCount} malformed lines`);
+      }
       return outcomes;
-    } catch {
+    } catch (err) {
+      // File doesn't exist is expected for new installations
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        log.debug(
+          `[meta-learning] loadOutcomes failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       return [];
     }
   }
