@@ -74,6 +74,7 @@ export function startGatewayMaintenanceTimers(params: {
 
   // dedupe cache cleanup - LRU cache handles TTL and size automatically, but run cleanup for expired entries
   const dedupeCleanup = setInterval(() => {
+    const now = Date.now();
     // Clean up expired entries in the LRU cache
     params.dedupe.cleanup();
 
