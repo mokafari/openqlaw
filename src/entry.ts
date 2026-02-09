@@ -17,12 +17,16 @@ if (process.argv.includes("--no-color")) {
 }
 
 const EXPERIMENTAL_WARNING_FLAG = "--disable-warning=ExperimentalWarning";
+const EXPERIMENTAL_SQLITE_FLAG = "--experimental-sqlite";
 
-function hasExperimentalWarningSuppressed(nodeOptions: string): boolean {
+function hasRequiredNodeFlags(nodeOptions: string): boolean {
   if (!nodeOptions) {
     return false;
   }
-  return nodeOptions.includes(EXPERIMENTAL_WARNING_FLAG) || nodeOptions.includes("--no-warnings");
+  const hasWarningFlag =
+    nodeOptions.includes(EXPERIMENTAL_WARNING_FLAG) || nodeOptions.includes("--no-warnings");
+  const hasSqliteFlag = nodeOptions.includes(EXPERIMENTAL_SQLITE_FLAG);
+  return hasWarningFlag && hasSqliteFlag;
 }
 
 function ensureExperimentalWarningSuppressed(): boolean {
@@ -33,12 +37,14 @@ function ensureExperimentalWarningSuppressed(): boolean {
     return false;
   }
   const nodeOptions = process.env.NODE_OPTIONS ?? "";
-  if (hasExperimentalWarningSuppressed(nodeOptions)) {
+  if (hasRequiredNodeFlags(nodeOptions)) {
     return false;
   }
 
   process.env.OPENCLAW_NODE_OPTIONS_READY = "1";
-  process.env.NODE_OPTIONS = `${nodeOptions} ${EXPERIMENTAL_WARNING_FLAG}`.trim();
+  // Add both experimental warning suppression and sqlite support
+  const newFlags = [EXPERIMENTAL_WARNING_FLAG, EXPERIMENTAL_SQLITE_FLAG].join(" ");
+  process.env.NODE_OPTIONS = `${nodeOptions} ${newFlags}`.trim();
 
   const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
     stdio: "inherit",
