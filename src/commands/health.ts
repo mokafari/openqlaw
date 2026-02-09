@@ -18,6 +18,7 @@ import {
 import { buildChannelAccountBindings, resolvePreferredAccountId } from "../routing/bindings.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { theme } from "../terminal/theme.js";
+import { BUILD_INFO } from "../version.js";
 
 export type ChannelAccountHealthSummary = {
   accountId: string;
@@ -52,6 +53,13 @@ export type HealthSummary = {
   ok: true;
   ts: number;
   durationMs: number;
+  /** Build version info for verifying updates */
+  version: {
+    version: string;
+    commit: string | null;
+    commitShort: string | null;
+    builtAt: string | null;
+  };
   channels: Record<string, ChannelHealthSummary>;
   channelOrder: string[];
   channelLabels: Record<string, string>;
@@ -543,6 +551,12 @@ export async function getHealthSnapshot(params?: {
     ok: true,
     ts: Date.now(),
     durationMs: Date.now() - start,
+    version: {
+      version: BUILD_INFO.version,
+      commit: BUILD_INFO.commit,
+      commitShort: BUILD_INFO.commitShort,
+      builtAt: BUILD_INFO.builtAt,
+    },
     channels,
     channelOrder,
     channelLabels,
