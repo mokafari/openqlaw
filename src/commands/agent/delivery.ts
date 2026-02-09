@@ -69,8 +69,11 @@ export async function deliverAgentCommandResult(params: {
   const { cfg, deps, runtime, opts, sessionEntry, payloads, result } = params;
   const deliver = opts.deliver === true;
   const bestEffortDeliver = opts.bestEffortDeliver === true;
-  // Prevent cross-channel echo: use originatingChannel if session has origin info
-  const originatingChannel = sessionEntry?.origin?.surface ?? sessionEntry?.channel;
+  // Prevent cross-channel echo: prefer current request's channel context over session state
+  // opts.messageChannel = current incoming request's channel (tui, webchat, imessage, etc.)
+  // sessionEntry?.origin?.surface = session's stored origin (may be stale from previous interactions)
+  const originatingChannel =
+    opts.messageChannel ?? sessionEntry?.origin?.surface ?? sessionEntry?.channel;
   const deliveryPlan = resolveAgentDeliveryPlan({
     sessionEntry,
     requestedChannel: opts.replyChannel ?? opts.channel,
