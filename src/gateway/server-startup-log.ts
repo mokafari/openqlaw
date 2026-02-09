@@ -3,6 +3,7 @@ import type { loadConfig } from "../config/config.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveConfiguredModelRef } from "../agents/model-selection.js";
 import { getResolvedLoggerSettings } from "../logging.js";
+import { BUILD_INFO, getVersionString } from "../version.js";
 
 export function logGatewayStartup(params: {
   cfg: ReturnType<typeof loadConfig>;
@@ -13,6 +14,15 @@ export function logGatewayStartup(params: {
   log: { info: (msg: string, meta?: Record<string, unknown>) => void };
   isNixMode: boolean;
 }) {
+  // Log version info at startup
+  const versionStr = getVersionString();
+  params.log.info(`OpenClaw ${versionStr}`, {
+    consoleMessage: `OpenClaw ${chalk.cyan(versionStr)}`,
+  });
+  if (BUILD_INFO.builtAt) {
+    params.log.info(`built at: ${BUILD_INFO.builtAt}`);
+  }
+
   const { provider: agentProvider, model: agentModel } = resolveConfiguredModelRef({
     cfg: params.cfg,
     defaultProvider: DEFAULT_PROVIDER,
