@@ -320,6 +320,8 @@ export const agentHandlers: GatewayRequestHandlers = {
       typeof request.threadId === "string" && request.threadId.trim()
         ? request.threadId.trim()
         : undefined;
+    // Prevent cross-channel echo: use originatingChannel if session has origin info
+    const originatingChannel = sessionEntry?.origin?.surface ?? sessionEntry?.channel;
     const deliveryPlan = resolveAgentDeliveryPlan({
       sessionEntry,
       requestedChannel: request.replyChannel ?? request.channel,
@@ -327,6 +329,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       explicitThreadId,
       accountId: request.replyAccountId ?? request.accountId,
       wantsDelivery,
+      originatingChannel,
     });
 
     const resolvedChannel = deliveryPlan.resolvedChannel;

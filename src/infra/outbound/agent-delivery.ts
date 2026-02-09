@@ -33,11 +33,14 @@ export function resolveAgentDeliveryPlan(params: {
   explicitThreadId?: string | number;
   accountId?: string;
   wantsDelivery: boolean;
+  originatingChannel?: string;
 }): AgentDeliveryPlan {
   const requestedRaw =
     typeof params.requestedChannel === "string" ? params.requestedChannel.trim() : "";
   const normalizedRequested = requestedRaw ? normalizeMessageChannel(requestedRaw) : undefined;
-  const requestedChannel = normalizedRequested || "last";
+  // If originatingChannel is set, use it instead of "last" to prevent cross-channel echoes
+  const requestedChannel =
+    normalizedRequested || (params.originatingChannel ? params.originatingChannel : "last");
 
   const explicitTo =
     typeof params.explicitTo === "string" && params.explicitTo.trim()

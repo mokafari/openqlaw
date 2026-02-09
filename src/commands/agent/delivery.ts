@@ -69,6 +69,8 @@ export async function deliverAgentCommandResult(params: {
   const { cfg, deps, runtime, opts, sessionEntry, payloads, result } = params;
   const deliver = opts.deliver === true;
   const bestEffortDeliver = opts.bestEffortDeliver === true;
+  // Prevent cross-channel echo: use originatingChannel if session has origin info
+  const originatingChannel = sessionEntry?.origin?.surface ?? sessionEntry?.channel;
   const deliveryPlan = resolveAgentDeliveryPlan({
     sessionEntry,
     requestedChannel: opts.replyChannel ?? opts.channel,
@@ -76,6 +78,7 @@ export async function deliverAgentCommandResult(params: {
     explicitThreadId: opts.threadId,
     accountId: opts.replyAccountId ?? opts.accountId,
     wantsDelivery: deliver,
+    originatingChannel,
   });
   const deliveryChannel = deliveryPlan.resolvedChannel;
   // Channel docking: delivery channels are resolved via plugin registry.
