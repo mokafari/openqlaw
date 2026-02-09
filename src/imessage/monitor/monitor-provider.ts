@@ -277,6 +277,16 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
 
     // Also deduplicate by content (imsg creates separate entries with different IDs for the same message)
     const textContent = message.text?.trim() ?? "";
+
+    // Echo detection: check if this message is an echo of something we recently sent
+    if (textContent) {
+      const echoDetector = getEchoDetector();
+      const echoCheck = echoDetector.detectEcho(textContent, sender);
+      if (echoCheck.isEcho) {
+        logVerbose(`imessage: filtered echo from ${sender}: ${echoCheck.reason}`);
+        return;
+      }
+    }
     if (textContent) {
       // Create content hash: first 100 chars of text (enough to detect duplicates)
       const contentKey = textContent.substring(0, 100);
