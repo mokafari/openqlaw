@@ -3,6 +3,7 @@ import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OpenClawConfig } from "../../config/config.js";
+import { isSubagentSessionKey } from "../../routing/session-key.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { setCompactionSafeguardRuntime } from "../pi-extensions/compaction-safeguard-runtime.js";
@@ -71,12 +72,16 @@ function resolveCompactionMode(cfg?: OpenClawConfig): "default" | "safeguard" {
   return cfg?.agents?.defaults?.compaction?.mode === "safeguard" ? "safeguard" : "default";
 }
 
+/** Subagents need less history context — they have a focused task. */
+const SUBAGENT_MAX_HISTORY_SHARE = 0.25;
+
 export function buildEmbeddedExtensionPaths(params: {
   cfg: OpenClawConfig | undefined;
   sessionManager: SessionManager;
   provider: string;
   modelId: string;
   model: Model<Api> | undefined;
+  sessionKey?: string;
 }): string[] {
   const paths: string[] = [];
   if (resolveCompactionMode(params.cfg) === "safeguard") {
@@ -88,8 +93,13 @@ export function buildEmbeddedExtensionPaths(params: {
       modelContextWindow: params.model?.contextWindow,
       defaultTokens: DEFAULT_CONTEXT_TOKENS,
     });
+    // Subagent sessions get a tighter history budget to reduce context bloat.
+    const isSubagent = params.sessionKey ? isSubagentSessionKey(params.sessionKey) : false;
+    const maxHistoryShare = isSubagent
+      ? SUBAGENT_MAX_HISTORY_SHARE
+      : compactionCfg?.maxHistoryShare;
     setCompactionSafeguardRuntime(params.sessionManager, {
-      maxHistoryShare: compactionCfg?.maxHistoryShare,
+      maxHistoryShare,
       contextWindowTokens: contextWindowInfo.tokens,
     });
     paths.push(resolvePiExtensionPath("compaction-safeguard"));
